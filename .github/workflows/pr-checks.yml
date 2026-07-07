@@ -1,0 +1,25 @@
+name: PR Validations
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  pr-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.LASSOPS_PUSH }}
+
+      - name: Run PR Validations
+        uses: lasso-security/github-action/pr-validation@dev
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          linear-token: ${{ secrets.LINEAR_APP_TOKEN }}

@@ -60,10 +60,21 @@ local function scan_messages_from_response(choices)
   return scan, meta
 end
 
-local function session_id()
+local function session_id(conf)
   local shared = kong.ctx.shared
   if not shared.lasso_session_id then
-    shared.lasso_session_id = lasso.gen_ulid()
+    -- Prefer a client-supplied conversation id (Kong has none of its own), so multi-turn
+    -- calls sharing that header aggregate into one Lasso dialogue. Fall back to a generated
+    -- ULID, which still groups the prompt+completion of this single request.
+    local from_header
+    if conf.session_header and conf.session_header ~= "" then
+      from_header = kong.request.get_header(conf.session_header)
+    end
+    if from_header and from_header ~= "" then
+      shared.lasso_session_id = from_header
+    else
+      shared.lasso_session_id = lasso.gen_ulid()
+    end
   end
   return shared.lasso_session_id
 end
@@ -92,7 +103,7 @@ local function classify(conf, scan, tools, source)
   local payload = lasso.build_payload({
     messages = scan,
     message_type = dir.message_type,
-    session_id = session_id(),
+    session_id = session_id(conf),
     user_id = resolve_user_id(conf),
     tools = tools,
     source_type = conf.source_type,

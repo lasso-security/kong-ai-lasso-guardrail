@@ -29,6 +29,11 @@ return {
           { source_type = { type = "string", default = "kong" } },
           -- Header carrying a stable end-user id to forward as userId.
           { user_header = { type = "string", default = "x-lasso-user-id" } },
+          -- Header carrying a client-supplied conversation/session id, reused across turns
+          -- to aggregate a multi-turn dialogue. Kong has no native session concept, so this
+          -- must come from the caller (the Kong AI ecosystem convention, e.g. Langfuse's
+          -- X-Session-Id). When absent, a per-request ULID is generated instead.
+          { session_header = { type = "string", default = "x-session-id" } },
           { block_status_code = {
               type = "integer", default = 400, between = { 100, 599 },
           } },

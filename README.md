@@ -66,7 +66,8 @@ Attach to an AI Proxy route (see `kong/kong.yml` for a full decK example):
 | `fail_open` | `true` | Allow on Lasso timeout/5xx. Auth errors always surface. |
 | `timeout` | `10000` | Lasso call timeout (ms). |
 | `source_type` | `kong` | `source.type` for the "Used By" badge. |
-| `user_header` | `x-lasso-user-id` | Header to read a stable end-user id from. |
+| `user_header` | `x-lasso-user-id` | Header to read a stable end-user id from (→ `userId`). |
+| `session_header` | `x-session-id` | Header carrying a client-supplied conversation id; reused across turns → one Lasso dialogue. Kong has no native session, so this comes from the caller (Langfuse/Fiddler convention). Falls back to a generated ULID. |
 | `block_status_code` / `block_message` | `400` / … | Response when blocked. |
 
 ## Test

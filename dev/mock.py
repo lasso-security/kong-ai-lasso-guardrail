@@ -75,6 +75,11 @@ class H(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             body = {}
         p = self.path
+        if p in ("/gateway/v3/classify", "/gateway/v3/classifix"):
+            # Surface what the plugin sent so the e2e can assert on sessionId/source.
+            print("LASSO_CALL sessionId=%s source=%s type=%s"
+                  % (body.get("sessionId"), (body.get("source") or {}).get("type"),
+                     body.get("messageType")), flush=True)
         if p == "/gateway/v3/classify":
             return self._send(200, classify(text_of(body), masking=False))
         if p == "/gateway/v3/classifix":

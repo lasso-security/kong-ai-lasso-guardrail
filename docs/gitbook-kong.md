@@ -52,6 +52,7 @@ plugins:
 | `fail_open` | `true` | Allow traffic when Lasso is unreachable/5xx; a bad key is always surfaced. |
 | `source_type` | `kong` | Attribution shown in Lasso's "Used By" view. |
 | `user_header` | `x-lasso-user-id` | Header carrying a stable end-user id. |
+| `session_header` | `x-session-id` | Header carrying a client-supplied conversation id, reused across turns to group a multi-turn dialogue. Falls back to a generated id when absent. |
 | `block_status_code` / `block_message` | `400` / … | Response returned when content is blocked. |
 
 ## What's enforced

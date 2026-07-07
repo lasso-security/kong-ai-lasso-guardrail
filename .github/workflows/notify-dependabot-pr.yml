@@ -1,0 +1,20 @@
+name: Alert on Dependabot PR
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write 
+
+jobs:
+  notify:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Dependabot Alert
+        uses: lasso-security/github-action/dependabot-new-pr-alert@dependabot-new-pr-alert-1.0.1
+        with:
+          slack_webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}

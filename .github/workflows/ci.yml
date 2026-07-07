@@ -8,14 +8,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: imega/busted:latest
     steps:
       - uses: actions/checkout@v4
+
+      # Lua 5.1 = OpenResty/LuaJIT target (what Kong runs).
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      - uses: leafo/gh-actions-luarocks@v4
+
+      - name: Install busted
+        run: luarocks install busted
 
       - name: Lua syntax check (parse all sources + specs)
         run: |
           for f in $(find kong spec -name '*.lua' | sort); do
-            lua5.1 -e "assert(loadfile('$f'))" && echo "ok   $f"
+            lua -e "assert(loadfile('$f'))" && echo "ok   $f"
           done
 
       - name: Unit tests (busted)

@@ -1,0 +1,70 @@
+name: Weekly - Dependabot PR Summary
+
+on:
+  schedule:
+    - cron: '0 5 * * 0'  # Runs at 08:00 Israel time (UTC+3) every Sunday
+  workflow_dispatch:
+
+env:
+  REPO: ${{ github.repository }}
+
+jobs:
+  pr-summary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+    
+      - name: Generate GitHub App token
+        id: generate_token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.CI_CLONE_BOT_APP_ID }}
+          private_key: ${{ secrets.CI_CLONE_BOT_APP_PRIVATE_KEY }}
+
+      - name: Generate Slack payload file
+        env:
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          gh pr list --state open --author "dependabot[bot]" --json title,url | \
+            jq -c '[.[] | {
+              color: "#439FE0",
+              title: .title,
+              title_link: .url,
+              text: "🔗 <\(.url)|View PR> from \(.url | split("/")[4])"
+            }]' > attachments.json
+
+          jq -n \
+            --arg channel "#dependabot" \
+            --arg header "🧵 *Open Dependabot PRs in \`$REPO\`*" \
+            --slurpfile atts attachments.json \
+            '{
+              channel: $channel,
+              text: $header,
+              attachments: $atts[0]
+            }' > payload.json
+
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          payload-file-path: payload.json
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+
+  notify_failure:
+    if: ${{ failure() }}
+    needs: [pr-summary]
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure notification
+        uses: lasso-security/github-action/notify-failure@notify-failure-1.0.3
+        with:
+          environment: 'Scan Dependabot Open PR'
+          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          slack-channel: '#infra-failuers'
+          slack-bot-token: ${{ secrets.SLACK_GITHUB_BOT }}

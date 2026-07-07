@@ -1,0 +1,22 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: imega/busted:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lua syntax check (parse all sources + specs)
+        run: |
+          for f in $(find kong spec -name '*.lua' | sort); do
+            lua5.1 -e "assert(loadfile('$f'))" && echo "ok   $f"
+          done
+
+      - name: Unit tests (busted)
+        run: busted spec/ai-lasso-guardrail/lasso_spec.lua

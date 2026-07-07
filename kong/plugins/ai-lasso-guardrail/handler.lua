@@ -191,7 +191,11 @@ function AiLassoGuardrail:response(conf)
     end
     local ok, encoded = pcall(cjson.encode, body)
     if ok then
-      kong.response.set_raw_body(encoded)
+      -- Replace the buffered response with the masked body. We use kong.response.exit
+      -- (allowed in the response phase) rather than set_raw_body (body_filter-only), so
+      -- the whole rewrite happens in one phase before headers are flushed.
+      return kong.response.exit(kong.response.get_status(), encoded,
+        { ["Content-Type"] = "application/json" })
     else
       kong.log.err("lasso guardrail: failed to re-encode masked response body")
     end

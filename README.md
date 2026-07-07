@@ -93,5 +93,5 @@ kong/plugins/ai-lasso-guardrail/
   client.lua    resty.http + cjson transport
 kong/kong.yml   example decK config
 spec/           busted unit tests + Pongo integration spec
-docs/           GitBook draft + registry entry
+dev/            local Kong e2e harness (docker-compose + mock)
 ```

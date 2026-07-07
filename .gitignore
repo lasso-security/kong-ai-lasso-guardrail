@@ -14,3 +14,5 @@ luacov.*.out
 .DS_Store
 .idea/
 .vscode/
+dev/*.staging.yml
+dev/.env

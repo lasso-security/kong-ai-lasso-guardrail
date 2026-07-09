@@ -192,3 +192,74 @@ describe("decide", function()
     assert.equal("allow", d.action)
   end)
 end)
+
+describe("derive_event_id", function()
+  local tid = "01HF3Z9DEFN0SGKPVJ9BQ6RPXG"
+  it("is a 26-char Crockford id", function()
+    local e = lasso.derive_event_id(tid, 0)
+    assert.equal(26, #e)
+    assert.is_true(is_crockford(e))
+  end)
+  it("is deterministic for the same (trace, index)", function()
+    assert.equal(lasso.derive_event_id(tid, 5), lasso.derive_event_id(tid, 5))
+  end)
+  it("is unique per index within a trace", function()
+    assert.are_not.equal(lasso.derive_event_id(tid, 0), lasso.derive_event_id(tid, 1))
+  end)
+end)
+
+describe("to_intent_messages", function()
+  local tid = "01HF3Z9DEFN0SGKPVJ9BQ6RPXG"
+  local history = {
+    { role = "system", content = "be helpful" },
+    { role = "user", content = "where is order 123?" },
+    { role = "assistant", content = "", tool_calls = {
+        { id = "call_1", ["function"] = { name = "get_order", arguments = '{"id":123}' } } } },
+    { role = "tool", tool_call_id = "call_1", content = '{"status":"shipped"}' },
+  }
+
+  it("maps user/tool_use/tool_result with monotonic 0-based eventIndex", function()
+    local out, n = lasso.to_intent_messages(history, tid, 0)
+    assert.equal(4, n)
+    assert.equal("user", out[2].role)
+    assert.equal(1, out[2].eventIndex)
+    assert.equal("tool_use", out[3].content.type)
+    assert.equal("get_order", out[3].content.name)
+    assert.equal(2, out[3].eventIndex)
+    assert.equal("tool_result", out[4].content.type)
+    assert.equal("call_1", out[4].content.tool_use_id)
+    assert.equal(3, out[4].eventIndex)
+  end)
+
+  it("stamps traceId + a derived eventId on every event", function()
+    local out = lasso.to_intent_messages(history, tid, 0)
+    for _, e in ipairs(out) do
+      assert.equal(tid, e.traceId)
+      assert.equal(26, #e.eventId)
+    end
+  end)
+
+  it("is stable across re-sends (idempotent history)", function()
+    local a = lasso.to_intent_messages(history, tid, 0)
+    local b = lasso.to_intent_messages(history, tid, 0)
+    for i = 1, #a do
+      assert.equal(a[i].eventId, b[i].eventId)
+      assert.equal(a[i].eventIndex, b[i].eventIndex)
+    end
+  end)
+
+  it("continues the index from start_index (response phase)", function()
+    local out = lasso.to_intent_messages({ { role = "assistant", content = "done" } }, tid, 4)
+    assert.equal(4, out[1].eventIndex)
+    assert.equal(lasso.derive_event_id(tid, 4), out[1].eventId)
+  end)
+end)
+
+describe("flatten_text", function()
+  it("returns a plain string as-is", function()
+    assert.equal("hi", lasso.flatten_text("hi"))
+  end)
+  it("joins text blocks and ignores non-text blocks", function()
+    assert.equal("a b", lasso.flatten_text({ { type = "text", text = "a" }, { type = "image" }, { type = "text", text = "b" } }))
+  end)
+end)

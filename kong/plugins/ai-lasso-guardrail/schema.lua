@@ -19,6 +19,15 @@ return {
           { masking = { type = "boolean", default = false } },
           -- Which directions to scan.
           { guard_request = { type = "boolean", default = true } },
+          -- Intent double-duty (single-egress): when true AND a request carries the trace
+          -- header, the plugin's existing access/response classify calls also feed the intent
+          -- pipeline (RND-6372 Suggestion 2) — the app only seeds a per-turn traceId. Auto-
+          -- masking body-rewrite is not applied in intent mode (detect/block still enforced).
+          { intent = { type = "boolean", default = false } },
+          -- Header the app stamps with a per-turn ULID traceId (see lasso-sdk KongIntent).
+          { intent_trace_header = { type = "string", default = "x-lasso-trace-id" } },
+          -- Header carrying the application intent (baseline the trace is scored against).
+          { intent_app_intent_header = { type = "string", default = "x-lasso-application-intent" } },
           -- Response scanning buffers the upstream body (disables SSE streaming for the
           -- route) — leave off for streaming clients.
           { guard_response = { type = "boolean", default = false } },

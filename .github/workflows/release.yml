@@ -1,0 +1,19 @@
+name: release
+
+# Publish the LuaRocks rock when a version tag is pushed (e.g. `1.0.0`).
+# Requires a repo/org secret LUAROCKS_API_KEY (DevOps to provision).
+on:
+  push:
+    tags: ["*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      - uses: leafo/gh-actions-luarocks@v4
+      - name: Upload rock to LuaRocks
+        run: luarocks upload ai-lasso-guardrail-*.rockspec --api-key="${{ secrets.LUAROCKS_API_KEY }}"

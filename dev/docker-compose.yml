@@ -1,0 +1,32 @@
+# Local Kong e2e for the ai-lasso-guardrail plugin.
+#   docker compose -f dev/docker-compose.yml up -d --wait
+#   ./dev/e2e.sh
+#   docker compose -f dev/docker-compose.yml down
+services:
+  mock:
+    image: python:3.12-slim
+    command: python /mock.py
+    volumes:
+      - ./mock.py:/mock.py:ro
+    expose: ["8080"]
+
+  kong:
+    image: kong:3.9
+    depends_on: [mock]
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PLUGINS: bundled,ai-lasso-guardrail
+      KONG_LUA_PACKAGE_PATH: /plugins/?.lua;;
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_LOG_LEVEL: info
+    volumes:
+      - ./kong.yml:/kong/kong.yml:ro
+      - ../kong:/plugins/kong:ro
+    ports:
+      - "8010:8000"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

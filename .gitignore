@@ -1,0 +1,18 @@
+# LuaRocks build artifacts
+*.rock
+*.src.rock
+lua_modules/
+.luarocks/
+
+# Pongo / test artifacts
+.pongo/
+servroot/
+luacov.*.out
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+dev/*.staging.yml
+dev/.env

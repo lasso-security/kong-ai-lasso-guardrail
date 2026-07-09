@@ -1,0 +1,39 @@
+# Example decK / DB-less config: an AI Proxy route guarded by ai-lasso-guardrail.
+#
+#   KONG_PLUGINS=bundled,ai-lasso-guardrail        # enable the custom plugin
+#   KONG_DATABASE=off KONG_DECLARATIVE_CONFIG=kong/kong.yml kong start
+_format_version: "3.0"
+
+services:
+  - name: openai-chat
+    url: https://api.openai.com
+    routes:
+      - name: chat
+        paths:
+          - /chat
+    plugins:
+      - name: ai-proxy
+        config:
+          route_type: llm/v1/chat
+          auth:
+            header_name: Authorization
+            header_value: Bearer ${{ env "DECK_OPENAI_API_KEY" }}
+          model:
+            provider: openai
+            name: gpt-4o-mini
+
+      - name: ai-lasso-guardrail
+        config:
+          lasso_api_key: ${{ env "DECK_LASSO_API_KEY" }}
+          lasso_api_base: https://server.lasso.security/gateway/v3
+          # Detect + block prompts and (optionally) completions.
+          guard_request: true
+          # Response scanning buffers the upstream body — disables SSE streaming for this
+          # route. Leave false for streaming clients.
+          guard_response: false
+          # Turn on to mask PII via /classifix (rewrites the body). Off = /classify only.
+          masking: false
+          fail_open: true
+          source_type: kong
+          block_status_code: 400
+          block_message: "Request blocked by Lasso guardrail"

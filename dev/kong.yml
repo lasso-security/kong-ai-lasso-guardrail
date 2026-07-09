@@ -1,0 +1,34 @@
+_format_version: "3.0"
+
+services:
+  # Request-direction guard: scans + masks the prompt, upstream echoes what it received.
+  - name: echo
+    url: http://mock:8080/v1/chat/completions
+    routes:
+      - name: guard
+        paths: ["/guard"]
+    plugins:
+      - name: ai-lasso-guardrail
+        config:
+          lasso_api_key: test-key
+          lasso_api_base: http://mock:8080/gateway/v3
+          guard_request: true
+          guard_response: false
+          masking: true
+          ssl_verify: false
+
+  # Response-direction guard: upstream returns PII, plugin masks the completion.
+  - name: pii
+    url: http://mock:8080/v1/pii/chat/completions
+    routes:
+      - name: guard-resp
+        paths: ["/guard-resp"]
+    plugins:
+      - name: ai-lasso-guardrail
+        config:
+          lasso_api_key: test-key
+          lasso_api_base: http://mock:8080/gateway/v3
+          guard_request: false
+          guard_response: true
+          masking: true
+          ssl_verify: false

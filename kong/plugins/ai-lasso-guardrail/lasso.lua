@@ -111,12 +111,30 @@ function M.derive_event_id(trace_id, event_index)
   return prefix .. table.concat(suffix)
 end
 
+-- Parse an OpenAI tool-call `arguments` into the object the server's tool_use block requires.
+-- Arguments arrive as a JSON string on the wire; `decode_json` (injected so this module stays
+-- pure/cjson-free) turns it into a table. Already-decoded tables pass through; anything that
+-- fails to decode becomes an empty object — still a valid tool_use input for the server.
+local function tool_input_object(arguments, decode_json)
+  if type(arguments) == "table" then
+    return arguments
+  end
+  if type(arguments) == "string" and type(decode_json) == "function" then
+    local decoded = decode_json(arguments)
+    if type(decoded) == "table" then
+      return decoded
+    end
+  end
+  return {}
+end
+
 -- Transform OpenAI-wire messages into intent Messages with stable
 -- traceId/eventId/eventIndex. `start_index` offsets the (0-based) event index so
 -- the response phase continues after the request phase's events. Deterministic +
 -- append-only ⟹ re-sent history yields identical ids ⟹ server-side idempotency.
--- Returns (intent_messages, produced_count).
-function M.to_intent_messages(messages, trace_id, start_index)
+-- `decode_json` (e.g. cjson.decode) parses tool-call arguments into the object the
+-- server's tool_use block requires. Returns (intent_messages, produced_count).
+function M.to_intent_messages(messages, trace_id, start_index, decode_json)
   local out = {}
   local base = math.floor(tonumber(start_index) or 0)
   local function push(role, content)
@@ -134,9 +152,10 @@ function M.to_intent_messages(messages, trace_id, start_index)
     if type(m) == "table" and m.role then
       local role = tostring(m.role)
       if role == "tool" and m.tool_call_id then
-        -- OpenAI tool result -> tool_result block (TOOL_OUTPUT_TEXT).
-        push("tool", { type = "tool_result", tool_use_id = m.tool_call_id,
-                       content = M.flatten_text(m.content) })
+        -- OpenAI tool result -> tool_result block (TOOL_OUTPUT_TEXT). The server derives the
+        -- signal from the block type, but rejects role "tool"; tool results ride under `developer`.
+        push("developer", { type = "tool_result", tool_use_id = m.tool_call_id,
+                            content = M.flatten_text(m.content) })
       else
         -- Text first (USER_MESSAGE / MODEL_RESPONSE), then any tool calls.
         local text = M.flatten_text(m.content)
@@ -147,10 +166,11 @@ function M.to_intent_messages(messages, trace_id, start_index)
           for _, tc in ipairs(m.tool_calls) do
             local fn = type(tc) == "table" and tc["function"] or nil
             if type(fn) == "table" and fn.name then
-              -- OpenAI tool call -> tool_use block (TOOL_INPUT_TEXT). arguments is a
-              -- JSON string on the wire; forwarded as-is (the tool input text).
-              push("assistant", { type = "tool_use", id = tc.id, name = fn.name,
-                                  input = fn.arguments })
+              -- OpenAI tool call -> tool_use block (TOOL_INPUT_TEXT) under role `model`.
+              -- `arguments` is a JSON string on the wire; the server's tool_use block requires
+              -- an object, so decode it.
+              push("model", { type = "tool_use", id = tc.id, name = fn.name,
+                              input = tool_input_object(fn.arguments, decode_json) })
             end
           end
         end
@@ -158,6 +178,29 @@ function M.to_intent_messages(messages, trace_id, start_index)
     end
   end
   return out, #out
+end
+
+-- Convert OpenAI tool definitions ({type="function", function={name,description,parameters}})
+-- into the server's flat AvailableTool shape ({name, description, parameters}). Tools already in
+-- the flat shape pass through; entries without a string name are dropped. Returns nil when there
+-- is nothing to forward, so build_payload omits the field.
+function M.to_intent_tools(tools)
+  if type(tools) ~= "table" then
+    return nil
+  end
+  local out = {}
+  for _, t in ipairs(tools) do
+    if type(t) == "table" then
+      local fn = type(t["function"]) == "table" and t["function"] or t
+      if type(fn.name) == "string" and fn.name ~= "" then
+        out[#out + 1] = { name = fn.name, description = fn.description, parameters = fn.parameters }
+      end
+    end
+  end
+  if #out == 0 then
+    return nil
+  end
+  return out
 end
 
 -- Block if any finding across any deputy has action == "BLOCK". Returns (blocked, detail).

@@ -218,8 +218,14 @@ describe("to_intent_messages", function()
     { role = "tool", tool_call_id = "call_1", content = '{"status":"shipped"}' },
   }
 
+  -- Stub JSON decoder (busted runs plain Lua without cjson): turns the wire arguments
+  -- string into the object the server's tool_use block requires.
+  local function decode(_)
+    return { id = 123 }
+  end
+
   it("maps user/tool_use/tool_result with monotonic 0-based eventIndex", function()
-    local out, n = lasso.to_intent_messages(history, tid, 0)
+    local out, n = lasso.to_intent_messages(history, tid, 0, decode)
     assert.equal(4, n)
     assert.equal("user", out[2].role)
     assert.equal(1, out[2].eventIndex)
@@ -229,6 +235,23 @@ describe("to_intent_messages", function()
     assert.equal("tool_result", out[4].content.type)
     assert.equal("call_1", out[4].content.tool_use_id)
     assert.equal(3, out[4].eventIndex)
+  end)
+
+  it("emits tool_use under role 'model' and tool_result under role 'developer'", function()
+    local out = lasso.to_intent_messages(history, tid, 0, decode)
+    assert.equal("model", out[3].role)      -- tool_use
+    assert.equal("developer", out[4].role)  -- tool_result (server rejects role 'tool')
+  end)
+
+  it("decodes tool_use arguments into an object (server rejects a raw string)", function()
+    local out = lasso.to_intent_messages(history, tid, 0, decode)
+    assert.equal("table", type(out[3].content.input))
+    assert.equal(123, out[3].content.input.id)
+  end)
+
+  it("falls back to an empty object when arguments cannot be decoded", function()
+    local out = lasso.to_intent_messages(history, tid, 0) -- no decoder
+    assert.equal("table", type(out[3].content.input))
   end)
 
   it("stamps traceId + a derived eventId on every event", function()
@@ -252,6 +275,35 @@ describe("to_intent_messages", function()
     local out = lasso.to_intent_messages({ { role = "assistant", content = "done" } }, tid, 4)
     assert.equal(4, out[1].eventIndex)
     assert.equal(lasso.derive_event_id(tid, 4), out[1].eventId)
+  end)
+end)
+
+describe("to_intent_tools", function()
+  it("flattens OpenAI tool defs to the server's AvailableTool shape", function()
+    local out = lasso.to_intent_tools({
+      { type = "function", ["function"] = { name = "get_order",
+        description = "look up an order", parameters = { type = "object" } } },
+    })
+    assert.equal(1, #out)
+    assert.equal("get_order", out[1].name)
+    assert.equal("look up an order", out[1].description)
+    assert.equal("object", out[1].parameters.type)
+    assert.is_nil(out[1].type)      -- no OpenAI wrapper leaks through
+    assert.is_nil(out[1]["function"])
+  end)
+
+  it("passes already-flat tools through and drops nameless entries", function()
+    local out = lasso.to_intent_tools({
+      { name = "divide", description = "math" },
+      { type = "function", ["function"] = { description = "no name" } },
+    })
+    assert.equal(1, #out)
+    assert.equal("divide", out[1].name)
+  end)
+
+  it("returns nil when there is nothing to forward", function()
+    assert.is_nil(lasso.to_intent_tools(nil))
+    assert.is_nil(lasso.to_intent_tools({}))
   end)
 end)
 

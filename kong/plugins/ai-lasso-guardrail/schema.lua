@@ -28,6 +28,12 @@ return {
           { intent_trace_header = { type = "string", default = "x-lasso-trace-id" } },
           -- Header carrying the application intent (baseline the trace is scored against).
           { intent_app_intent_header = { type = "string", default = "x-lasso-application-intent" } },
+          -- Header carrying the application display name, so the trace shows up named in the UI.
+          { intent_app_name_header = { type = "string", default = "x-lasso-application-name" } },
+          -- Send the finalize marker (isLastEventInTrace) on a turn's terminal answer (completion
+          -- finish_reason "stop") so the server finalizes + scores the trace immediately instead of
+          -- waiting out the 10-min silence timer. Turns still in a tool loop are left to accumulate.
+          { intent_finalize_on_stop = { type = "boolean", default = true } },
           -- Response scanning buffers the upstream body (disables SSE streaming for the
           -- route) — leave off for streaming clients.
           { guard_response = { type = "boolean", default = false } },

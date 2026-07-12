@@ -1,0 +1,29 @@
+# Intent double-duty e2e: Kong + plugin (intent=true) -> live Lasso staging for classify,
+# real LiteLLM proxy as the LLM upstream. No mock — everything downstream is real.
+#   LASSO_API_KEY='<intent-enabled token>' \
+#     docker compose -f dev/docker-compose.intent.yml up -d --wait
+#   # then run the LangChain agent driver against http://localhost:8010
+#   docker compose -f dev/docker-compose.intent.yml down
+services:
+  kong:
+    image: kong:3.9
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.intent.yml
+      KONG_PLUGINS: bundled,ai-lasso-guardrail
+      KONG_LUA_PACKAGE_PATH: /plugins/?.lua;;
+      KONG_VAULTS: bundled
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_NGINX_PROXY_PROXY_BUFFERING: "on"
+      KONG_LOG_LEVEL: info
+      LASSO_API_KEY: ${LASSO_API_KEY}
+    volumes:
+      - ./kong.intent.yml:/kong/kong.intent.yml:ro
+      - ../kong:/plugins/kong:ro
+    ports:
+      - "8010:8000"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

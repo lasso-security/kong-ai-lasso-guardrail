@@ -1,0 +1,27 @@
+_format_version: "3.0"
+
+# Intent double-duty e2e: Kong + ai-lasso-guardrail(intent=true) in front of a REAL LLM
+# (the LiteLLM proxy). The app (lasso-sdk GatewayIntent) seeds x-lasso-trace-id /
+# x-session-id / x-lasso-application-intent; the plugin's existing access/response classify
+# calls double as intent ingestion against live Lasso staging. LASSO_API_KEY (an
+# intent-enabled application token) comes from Kong's env vault; the upstream LiteLLM key
+# rides through as the client's Authorization header (the plugin does not manage it).
+services:
+  - name: llm
+    url: https://litellm.lassosec.com
+    routes:
+      - name: chat
+        paths: ["/v1/chat/completions"]
+        strip_path: false
+    plugins:
+      - name: ai-lasso-guardrail
+        config:
+          lasso_api_key: "{vault://env/LASSO_API_KEY}"
+          lasso_api_base: https://server.lassosec.com/gateway/v3
+          intent: true
+          guard_request: true
+          guard_response: true
+          masking: false
+          fail_open: true
+          ssl_verify: true
+          source_type: kong

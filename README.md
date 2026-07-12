@@ -71,6 +71,8 @@ Attach to an AI Proxy route (see `kong/kong.yml` for a full decK example):
 | `intent` | `false` | Intent double-duty. When on **and** a request carries `intent_trace_header`, the existing `access`/`response` classify calls also feed the intent pipeline. Auto-masking body-rewrite is not applied in intent mode (detect/block still enforced). |
 | `intent_trace_header` | `x-lasso-trace-id` | Per-turn ULID `traceId` the app seeds (see the lasso-sdk `KongIntent` helper). Its presence activates intent for that request. |
 | `intent_app_intent_header` | `x-lasso-application-intent` | Application intent (the baseline the trace is scored against); upserted as session info. |
+| `intent_app_name_header` | `x-lasso-application-name` | Application display name; upserted as session info so the trace shows up named in the intent UI. |
+| `intent_finalize_on_stop` | `true` | Finalize + score the trace immediately on a turn's terminal answer (completion `finish_reason` `stop`) instead of waiting the server's 10-min silence timer. Tool-call turns keep accumulating. |
 | `block_status_code` / `block_message` | `400` / … | Response when blocked. |
 
 ### Intent double-duty (single-egress)

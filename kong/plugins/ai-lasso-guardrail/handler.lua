@@ -155,10 +155,17 @@ end
 
 local function intent_session_information(conf)
   local app_intent = kong.request.get_header(conf.intent_app_intent_header)
-  if app_intent and app_intent ~= "" then
-    return { applicationIntent = app_intent }
+  -- applicationIntent is required for sessionInformation, so it gates the whole block.
+  if not app_intent or app_intent == "" then
+    return nil
   end
-  return nil
+  local info = { applicationIntent = app_intent }
+  -- Optional display name so the trace shows up named in the intent UI (else it's unnamed).
+  local app_name = kong.request.get_header(conf.intent_app_name_header)
+  if app_name and app_name ~= "" then
+    info.agenticAppName = app_name
+  end
+  return info
 end
 
 -- Run one intent-enriched classify (content-safety + intent) for a set of intent
@@ -193,10 +200,11 @@ local function classify_intent(conf, messages, message_type, session_information
 end
 
 local function access_intent(conf, body, trace_id)
-  local messages, count = lasso.to_intent_messages(body.messages, trace_id, 0)
+  local messages, count = lasso.to_intent_messages(body.messages, trace_id, 0, cjson.decode)
   -- The response phase continues the event index right after the request's events.
   kong.ctx.shared.lasso_intent_count = count
-  return classify_intent(conf, messages, "PROMPT", intent_session_information(conf), body.tools)
+  return classify_intent(conf, messages, "PROMPT", intent_session_information(conf),
+    lasso.to_intent_tools(body.tools))
 end
 
 local function response_intent(conf, trace_id)
@@ -209,13 +217,24 @@ local function response_intent(conf, trace_id)
     return nil
   end
   local completion = {}
+  local terminal = false
   for _, c in ipairs(body.choices) do
     if type(c) == "table" and type(c.message) == "table" then
       completion[#completion + 1] = c.message
+      -- finish_reason "stop" = a plain answer with no further tool calls: the turn is done.
+      if c.finish_reason == "stop" then
+        terminal = true
+      end
     end
   end
   local start = kong.ctx.shared.lasso_intent_count or 0
-  local messages = lasso.to_intent_messages(completion, trace_id, start)
+  local messages = lasso.to_intent_messages(completion, trace_id, start, cjson.decode)
+  -- Finalize the trace the moment the turn produces its terminal answer, so the server scores it
+  -- now instead of after the 10-min silence timer. Tool-call turns (finish_reason "tool_calls")
+  -- are not marked, so a trace still mid-loop keeps accumulating.
+  if conf.intent_finalize_on_stop ~= false and terminal and #messages > 0 then
+    messages[#messages].isLastEventInTrace = true
+  end
   return classify_intent(conf, messages, "COMPLETION", nil, nil)
 end
 

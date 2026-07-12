@@ -224,17 +224,17 @@ describe("to_intent_messages", function()
     return { id = 123 }
   end
 
-  it("maps user/tool_use/tool_result with monotonic 0-based eventIndex", function()
+  it("maps user/tool_use/tool_result with stride-spaced eventIndex", function()
     local out, n = lasso.to_intent_messages(history, tid, 0, decode)
-    assert.equal(4, n)
+    assert.equal(4, n)                       -- n counts reproducible events (unmultiplied)
     assert.equal("user", out[2].role)
-    assert.equal(1, out[2].eventIndex)
+    assert.equal(10, out[2].eventIndex)      -- position 1 * STRIDE(10)
     assert.equal("tool_use", out[3].content.type)
     assert.equal("get_order", out[3].content.name)
-    assert.equal(2, out[3].eventIndex)
+    assert.equal(20, out[3].eventIndex)
     assert.equal("tool_result", out[4].content.type)
     assert.equal("call_1", out[4].content.tool_use_id)
-    assert.equal(3, out[4].eventIndex)
+    assert.equal(30, out[4].eventIndex)
   end)
 
   it("emits tool_use under role 'model' and tool_result under role 'developer'", function()
@@ -273,8 +273,85 @@ describe("to_intent_messages", function()
 
   it("continues the index from start_index (response phase)", function()
     local out = lasso.to_intent_messages({ { role = "assistant", content = "done" } }, tid, 4)
-    assert.equal(4, out[1].eventIndex)
-    assert.equal(lasso.derive_event_id(tid, 4), out[1].eventId)
+    assert.equal(40, out[1].eventIndex)                    -- (start 4 + pos 0) * STRIDE
+    assert.equal(lasso.derive_event_id(tid, 40), out[1].eventId)
+  end)
+
+  it("emits a reasoning block (role 'model') strictly BEFORE the answer it precedes", function()
+    local out = lasso.to_intent_messages(
+      { { role = "assistant", reasoning_content = "let me think", content = "the answer" } }, tid, 2)
+    local reason, ans = out[1], out[2]
+    assert.equal("reasoning", reason.content.type)
+    assert.equal("let me think", reason.content.content)
+    assert.equal("model", reason.role)
+    assert.equal("the answer", ans.content)
+    assert.equal(20, ans.eventIndex)                       -- answer at pos 2 * STRIDE, unshifted
+    assert.equal(lasso.derive_event_id(tid, 20), ans.eventId)
+    assert.equal(11, reason.eventIndex)                    -- reasoning in the gap (10,20) → before the answer
+    assert.is_true(reason.eventIndex < ans.eventIndex)
+    assert.not_equal(ans.eventId, reason.eventId)          -- distinct index → distinct id, no collision
+  end)
+
+  it("reasoning does not shift following tool_use, keeping the history re-send idempotent", function()
+    -- turn 1 COMPLETION: model reasons, then calls 2 tools (base = 2 after system + user)
+    local comp = lasso.to_intent_messages({ { role = "assistant", content = "", reasoning_content = "r",
+      tool_calls = { { id = "c1", ["function"] = { name = "a", arguments = "{}" } },
+                     { id = "c2", ["function"] = { name = "b", arguments = "{}" } } } } }, tid, 2, decode)
+    -- turn 2 PROMPT re-sends that same assistant turn; history carries NO reasoning_content
+    local hist = lasso.to_intent_messages({ { role = "assistant", content = "",
+      tool_calls = { { id = "c1", ["function"] = { name = "a", arguments = "{}" } },
+                     { id = "c2", ["function"] = { name = "b", arguments = "{}" } } } } }, tid, 2, decode)
+    -- comp = [reasoning@11, tool_use@20, tool_use@30]; hist = [tool_use@20, tool_use@30]
+    assert.equal("reasoning", comp[1].content.type)
+    assert.equal(11, comp[1].eventIndex)                   -- in the gap, strictly before the first tool_use
+    assert.equal(20, comp[2].eventIndex)
+    assert.equal(30, comp[3].eventIndex)
+    assert.is_true(comp[1].eventIndex < comp[2].eventIndex)
+    assert.equal(hist[1].eventId, comp[2].eventId)         -- tool_use #1 id matches across phases
+    assert.equal(hist[2].eventId, comp[3].eventId)         -- tool_use #2 id matches across phases
+    assert.not_equal(comp[1].eventId, comp[2].eventId)     -- reasoning collides with neither tool_use
+    assert.not_equal(comp[1].eventId, comp[3].eventId)
+  end)
+
+  it("falls back to thinking_blocks when reasoning_content is absent", function()
+    local out = lasso.to_intent_messages(
+      { { role = "assistant", content = "done", thinking_blocks = {
+          { type = "thinking", thinking = "step 1" }, { type = "thinking", thinking = " step 2" } } } }, tid, 0)
+    assert.equal("reasoning", out[1].content.type)
+    assert.equal("step 1 step 2", out[1].content.content)
+  end)
+
+  it("emits no reasoning block when the message carries none", function()
+    local out = lasso.to_intent_messages({ { role = "assistant", content = "plain" } }, tid, 0)
+    assert.equal(1, #out)
+    assert.equal("plain", out[1].content)
+  end)
+
+  it("gives consecutive reasoning-only messages distinct, ordered ids", function()
+    -- two back-to-back reasoning-only messages (e.g. an n>1 completion) must not collide,
+    -- even though neither advances the reproducible index.
+    local out = lasso.to_intent_messages({
+      { role = "assistant", reasoning_content = "first thought" },
+      { role = "assistant", reasoning_content = "second thought" },
+    }, tid, 2)
+    assert.equal(2, #out)
+    assert.equal("reasoning", out[1].content.type)
+    assert.equal("reasoning", out[2].content.type)
+    assert.is_true(out[1].eventIndex < out[2].eventIndex)  -- ascending in-gap order
+    assert.not_equal(out[1].eventId, out[2].eventId)       -- distinct ids, no collision
+  end)
+end)
+
+describe("reasoning_text", function()
+  it("prefers the reasoning_content string", function()
+    assert.equal("cot", lasso.reasoning_text({ reasoning_content = "cot" }))
+  end)
+  it("joins thinking_blocks when there is no reasoning_content", function()
+    assert.equal("ab", lasso.reasoning_text({ thinking_blocks = {
+      { type = "thinking", thinking = "a" }, { type = "thinking", thinking = "b" } } }))
+  end)
+  it("returns nil when the message has no reasoning", function()
+    assert.is_nil(lasso.reasoning_text({ content = "x" }))
   end)
 end)
 

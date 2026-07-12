@@ -17,6 +17,14 @@ local DIRECTION = {
 
 M.USER_ID_MAX_LENGTH = 128
 
+-- Reproducible events (text/tool_use/tool_result) are indexed on a stride so COMPLETION-only,
+-- non-reproducible events (reasoning) can slot strictly between them. A reproducible event at
+-- sequence position p gets eventIndex p*STRIDE; a reasoning event that precedes it gets p*STRIDE-1
+-- — strictly after the previous event, strictly before the one it explains, and off the stride grid
+-- so its derived eventId can't collide with a reproducible one either. Mirrors the SDK's "every
+-- event gets its own monotonic slot"; the stride just carves the room the gateway re-send model needs.
+M.EVENT_INDEX_STRIDE = 10
+
 local CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 local seeded = false
 
@@ -111,6 +119,31 @@ function M.derive_event_id(trace_id, event_index)
   return prefix .. table.concat(suffix)
 end
 
+-- Extract the model's reasoning text from a completion message, if the provider echoed it.
+-- OpenAI-compatible proxies surface extended thinking as `reasoning_content` (a string) and/or
+-- `thinking_blocks` ({type="thinking", thinking="..."}); prefer the string, else join the blocks.
+-- Returns nil when the message carries no reasoning (the common case — thinking off).
+function M.reasoning_text(m)
+  if type(m) ~= "table" then
+    return nil
+  end
+  if type(m.reasoning_content) == "string" and m.reasoning_content ~= "" then
+    return m.reasoning_content
+  end
+  if type(m.thinking_blocks) == "table" then
+    local parts = {}
+    for _, b in ipairs(m.thinking_blocks) do
+      if type(b) == "table" and type(b.thinking) == "string" and b.thinking ~= "" then
+        parts[#parts + 1] = b.thinking
+      end
+    end
+    if #parts > 0 then
+      return table.concat(parts, "")
+    end
+  end
+  return nil
+end
+
 -- Parse an OpenAI tool-call `arguments` into the object the server's tool_use block requires.
 -- Arguments arrive as a JSON string on the wire; `decode_json` (injected so this module stays
 -- pure/cjson-free) turns it into a table. Already-decoded tables pass through; anything that
@@ -137,11 +170,36 @@ end
 function M.to_intent_messages(messages, trace_id, start_index, decode_json)
   local out = {}
   local base = math.floor(tonumber(start_index) or 0)
+  -- Count ONLY reproducible events (text / tool_use / tool_result). This index space is what the
+  -- next turn's re-sent history reproduces, so it must stay stable regardless of reasoning.
+  local repro = 0
+  -- Reasoning events emitted since the last reproducible one, so several in a row (e.g. an n>1
+  -- completion) get distinct, ascending in-gap indices instead of colliding on one.
+  local gap = 0
   local function push(role, content)
-    local index = base + #out
+    local index = (base + repro) * M.EVENT_INDEX_STRIDE
+    repro = repro + 1
+    gap = 0
     out[#out + 1] = {
       role = role,
       content = content,
+      traceId = trace_id,
+      eventId = M.derive_event_id(trace_id, index),
+      eventIndex = index,
+    }
+  end
+  -- Reasoning does NOT advance `repro` (it never appears in re-sent history, so taking a reproducible
+  -- slot would shift the following tool_use/text and break cross-phase eventId idempotency). It fills
+  -- the gap just above the previous reproducible event, ascending: (base+repro-1)*STRIDE + 1 + gap —
+  -- strictly after that event, strictly before the next reproducible one, distinct per reasoning block
+  -- (gap), and off the stride grid so its derived eventId can't collide with a reproducible one.
+  local function push_reasoning(text)
+    local index = (base + repro - 1) * M.EVENT_INDEX_STRIDE + 1 + gap
+    if index < 0 then index = 0 end
+    gap = gap + 1
+    out[#out + 1] = {
+      role = "model",
+      content = { type = "reasoning", content = text },
       traceId = trace_id,
       eventId = M.derive_event_id(trace_id, index),
       eventIndex = index,
@@ -157,6 +215,13 @@ function M.to_intent_messages(messages, trace_id, start_index, decode_json)
         push("developer", { type = "tool_result", tool_use_id = m.tool_call_id,
                             content = M.flatten_text(m.content) })
       else
+        -- Chronological order within a model turn: reasoning first (REASONING_TEXT), then the
+        -- answer text (USER_MESSAGE / MODEL_RESPONSE), then any tool calls. Reasoning rides under
+        -- role `model` like tool_use — the server derives the signal from the block type.
+        local reasoning = M.reasoning_text(m)
+        if reasoning and reasoning ~= "" then
+          push_reasoning(reasoning)
+        end
         -- Text first (USER_MESSAGE / MODEL_RESPONSE), then any tool calls.
         local text = M.flatten_text(m.content)
         if text ~= nil and text ~= "" then
@@ -177,7 +242,9 @@ function M.to_intent_messages(messages, trace_id, start_index, decode_json)
       end
     end
   end
-  return out, #out
+  -- Second return is the count of REPRODUCIBLE events (indices consumed) — the start offset the
+  -- response phase continues from. Excludes reasoning, which consumes no reproducible index.
+  return out, repro
 end
 
 -- Convert OpenAI tool definitions ({type="function", function={name,description,parameters}})

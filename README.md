@@ -70,8 +70,9 @@ Attach to an AI Proxy route (see `kong/kong.yml` for a full decK example):
 | `session_header` | `x-session-id` | Header carrying a client-supplied conversation id; reused across turns → one Lasso dialogue. Kong has no native session, so this comes from the caller (Langfuse/Fiddler convention). Falls back to a generated ULID. |
 | `intent` | `false` | Intent double-duty. When on **and** a request carries `intent_trace_header`, the existing `access`/`response` classify calls also feed the intent pipeline. Auto-masking body-rewrite is not applied in intent mode (detect/block still enforced). |
 | `intent_trace_header` | `x-lasso-trace-id` | Per-turn ULID `traceId` the app seeds (see the lasso-sdk `GatewayIntent` helper). Its presence activates intent for that request. |
-| `intent_app_intent_header` | `x-lasso-application-intent` | Application intent (the baseline the trace is scored against); upserted as session info. Percent-encoded by the seeder (non-ASCII safe); the plugin decodes it. |
-| `intent_app_name_header` | `x-lasso-application-name` | Application display name; upserted as session info so the trace shows up named in the intent UI. Percent-encoded by the seeder; the plugin decodes it. |
+| `intent_app_intent_header` | `x-lasso-application-intent` | Application intent (the baseline the trace is scored against); upserted as session info. |
+| `intent_app_name_header` | `x-lasso-application-name` | Application display name; upserted as session info so the trace shows up named in the intent UI. |
+| `intent_encoding_header` | `x-lasso-encoding` | When `pct`, the plugin percent-decodes the intent/name headers (the seeder sets it only when they contain non-ASCII, e.g. Hebrew/emoji). |
 | `intent_finalize_on_stop` | `true` | Finalize + score the trace immediately on a turn's terminal answer (completion `finish_reason` `stop`) instead of waiting the server's 10-min silence timer. Tool-call turns keep accumulating. |
 | `block_status_code` / `block_message` | `400` / … | Response when blocked. |
 

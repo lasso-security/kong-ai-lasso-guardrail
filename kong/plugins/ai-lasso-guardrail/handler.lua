@@ -159,13 +159,20 @@ local function intent_session_information(conf)
   if not app_intent or app_intent == "" then
     return nil
   end
-  -- The seeder percent-encodes these free-text headers (so a non-ASCII intent/name can't
-  -- raise UnicodeEncodeError in the app's HTTP client); decode back to the original UTF-8.
-  local info = { applicationIntent = ngx.unescape_uri(app_intent) }
+  -- Free-text headers are percent-encoded only when non-ASCII (flagged by the marker);
+  -- decode iff flagged (a raw ASCII value may legitimately contain '%').
+  local encoded = kong.request.get_header(conf.intent_encoding_header) == "pct"
+  local function decode(value)
+    if encoded and value then
+      return ngx.unescape_uri(value)
+    end
+    return value
+  end
+  local info = { applicationIntent = decode(app_intent) }
   -- Optional display name so the trace shows up named in the intent UI (else it's unnamed).
   local app_name = kong.request.get_header(conf.intent_app_name_header)
   if app_name and app_name ~= "" then
-    info.agenticAppName = ngx.unescape_uri(app_name)
+    info.agenticAppName = decode(app_name)
   end
   return info
 end

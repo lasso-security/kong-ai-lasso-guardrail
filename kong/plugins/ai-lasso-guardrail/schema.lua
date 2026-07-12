@@ -30,6 +30,8 @@ return {
           { intent_app_intent_header = { type = "string", default = "x-lasso-application-intent" } },
           -- Header carrying the application display name, so the trace shows up named in the UI.
           { intent_app_name_header = { type = "string", default = "x-lasso-application-name" } },
+          -- Marker ("pct") the seeder sets when the intent/name headers are percent-encoded; gates decoding.
+          { intent_encoding_header = { type = "string", default = "x-lasso-encoding" } },
           -- Send the finalize marker (isLastEventInTrace) on a turn's terminal answer (completion
           -- finish_reason "stop") so the server finalizes + scores the trace immediately instead of
           -- waiting out the 10-min silence timer. Turns still in a tool loop are left to accumulate.

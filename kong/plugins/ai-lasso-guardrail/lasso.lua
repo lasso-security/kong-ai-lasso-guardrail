@@ -195,7 +195,9 @@ function M.to_intent_messages(messages, trace_id, start_index, decode_json)
   -- (gap), and off the stride grid so its derived eventId can't collide with a reproducible one.
   local function push_reasoning(text)
     local index = (base + repro - 1) * M.EVENT_INDEX_STRIDE + 1 + gap
-    if index < 0 then index = 0 end
+    -- Only negative if reasoning is the trace's very first event (no prior reproducible event to
+    -- sit after) — it has no valid slot before index 0, so skip rather than clamp into a used one.
+    if index < 0 then return end
     gap = gap + 1
     out[#out + 1] = {
       role = "model",
@@ -216,11 +218,15 @@ function M.to_intent_messages(messages, trace_id, start_index, decode_json)
                             content = M.flatten_text(m.content) })
       else
         -- Chronological order within a model turn: reasoning first (REASONING_TEXT), then the
-        -- answer text (USER_MESSAGE / MODEL_RESPONSE), then any tool calls. Reasoning rides under
-        -- role `model` like tool_use — the server derives the signal from the block type.
-        local reasoning = M.reasoning_text(m)
-        if reasoning and reasoning ~= "" then
-          push_reasoning(reasoning)
+        -- answer text (USER_MESSAGE / MODEL_RESPONSE), then any tool calls. Reasoning is a COMPLETION
+        -- signal — only the model's own turn carries it — so gate it on the assistant/model role;
+        -- a user/developer message with a stray reasoning field must not synthesize one. It rides
+        -- under role `model` (the server derives the signal from the block type).
+        if role == "assistant" or role == "model" then
+          local reasoning = M.reasoning_text(m)
+          if reasoning and reasoning ~= "" then
+            push_reasoning(reasoning)
+          end
         end
         -- Text first (USER_MESSAGE / MODEL_RESPONSE), then any tool calls.
         local text = M.flatten_text(m.content)

@@ -340,6 +340,15 @@ describe("to_intent_messages", function()
     assert.is_true(out[1].eventIndex < out[2].eventIndex)  -- ascending in-gap order
     assert.not_equal(out[1].eventId, out[2].eventId)       -- distinct ids, no collision
   end)
+
+  it("harvests reasoning only from completion (assistant/model) messages", function()
+    -- a stray reasoning field on a user/developer message must NOT synthesize a reasoning event
+    local out = lasso.to_intent_messages({
+      { role = "user", content = "hi", reasoning_content = "not the model's" },
+    }, tid, 0)
+    assert.equal(1, #out)
+    assert.equal("hi", out[1].content)                     -- only the user text, no reasoning block
+  end)
 end)
 
 describe("reasoning_text", function()

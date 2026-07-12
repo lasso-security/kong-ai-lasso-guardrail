@@ -62,7 +62,102 @@ function M.build_payload(opts)
   if opts.tools and #opts.tools > 0 then
     payload.tools = opts.tools
   end
+  -- Intent double-duty: session baseline the trace is scored against (upserted server-side).
+  if opts.session_information then
+    payload.sessionInformation = opts.session_information
+  end
   return payload
+end
+
+-- ── Intent double-duty (native pre/post-LLM) ────────────────────────────────
+-- When the app funnels LLM calls through Kong and seeds a per-turn `traceId`
+-- header, the plugin's existing `access`/`response` classify calls double as
+-- intent ingestion. These pure helpers turn OpenAI-wire messages into the
+-- server's intent `Message` shape (role x single content-block) with stable
+-- ids, so the server derives signals and dedups re-sent history by `eventId`.
+
+-- Flatten OpenAI content (string | array of {type=text,text=...}) to plain text.
+function M.flatten_text(content)
+  if type(content) == "string" then
+    return content
+  end
+  if type(content) == "table" then
+    local parts = {}
+    for _, block in ipairs(content) do
+      if type(block) == "table" and block.type == "text" and type(block.text) == "string" then
+        parts[#parts + 1] = block.text
+      end
+    end
+    return table.concat(parts, " ")
+  end
+  return ""
+end
+
+-- Deterministic ULID-shaped event id: stable for a (trace_id, event_index) pair
+-- across re-sends and unique within the trace, so the server's eventId-keyed cache
+-- collapses the conversation history re-sent on every call. Keeps the 26-char
+-- Crockford shape (passes the server's ULID validation): the trace_id's high 20
+-- chars + 6 chars of base32 index (supports 32^6 ≈ 1e9 events per trace).
+function M.derive_event_id(trace_id, event_index)
+  local prefix = tostring(trace_id or ""):sub(1, 20)
+  while #prefix < 20 do prefix = prefix .. "0" end
+  local n = math.floor(tonumber(event_index) or 0)
+  local suffix = {}
+  for i = 6, 1, -1 do
+    local idx = (n % 32) + 1
+    suffix[i] = CROCKFORD:sub(idx, idx)
+    n = math.floor(n / 32)
+  end
+  return prefix .. table.concat(suffix)
+end
+
+-- Transform OpenAI-wire messages into intent Messages with stable
+-- traceId/eventId/eventIndex. `start_index` offsets the (0-based) event index so
+-- the response phase continues after the request phase's events. Deterministic +
+-- append-only ⟹ re-sent history yields identical ids ⟹ server-side idempotency.
+-- Returns (intent_messages, produced_count).
+function M.to_intent_messages(messages, trace_id, start_index)
+  local out = {}
+  local base = math.floor(tonumber(start_index) or 0)
+  local function push(role, content)
+    local index = base + #out
+    out[#out + 1] = {
+      role = role,
+      content = content,
+      traceId = trace_id,
+      eventId = M.derive_event_id(trace_id, index),
+      eventIndex = index,
+    }
+  end
+
+  for _, m in ipairs(messages or {}) do
+    if type(m) == "table" and m.role then
+      local role = tostring(m.role)
+      if role == "tool" and m.tool_call_id then
+        -- OpenAI tool result -> tool_result block (TOOL_OUTPUT_TEXT).
+        push("tool", { type = "tool_result", tool_use_id = m.tool_call_id,
+                       content = M.flatten_text(m.content) })
+      else
+        -- Text first (USER_MESSAGE / MODEL_RESPONSE), then any tool calls.
+        local text = M.flatten_text(m.content)
+        if text ~= nil and text ~= "" then
+          push(role, text)
+        end
+        if type(m.tool_calls) == "table" then
+          for _, tc in ipairs(m.tool_calls) do
+            local fn = type(tc) == "table" and tc["function"] or nil
+            if type(fn) == "table" and fn.name then
+              -- OpenAI tool call -> tool_use block (TOOL_INPUT_TEXT). arguments is a
+              -- JSON string on the wire; forwarded as-is (the tool input text).
+              push("assistant", { type = "tool_use", id = tc.id, name = fn.name,
+                                  input = fn.arguments })
+            end
+          end
+        end
+      end
+    end
+  end
+  return out, #out
 end
 
 -- Block if any finding across any deputy has action == "BLOCK". Returns (blocked, detail).

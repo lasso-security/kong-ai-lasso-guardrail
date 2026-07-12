@@ -134,7 +134,103 @@ local function surface_auth()
   return kong.response.exit(500, { message = "Guardrail misconfigured" })
 end
 
+-- ── Intent double-duty ──────────────────────────────────────────────────────
+-- When intent mode is on and the app seeded a per-turn traceId header, the
+-- existing access/response classify calls also feed the intent trace. The app
+-- contributes only the traceId; Kong turns each phase's messages into intent
+-- events (stable ids via lasso.to_intent_messages) on the SAME classify that
+-- enforces content-safety. No separate call, no assembled trace.
+
+-- The per-turn traceId the app seeded, or nil when intent is off / not seeded.
+local function intent_trace_id(conf)
+  if not conf.intent then
+    return nil
+  end
+  local tid = kong.request.get_header(conf.intent_trace_header)
+  if tid and tid ~= "" then
+    return tid
+  end
+  return nil
+end
+
+local function intent_session_information(conf)
+  local app_intent = kong.request.get_header(conf.intent_app_intent_header)
+  if app_intent and app_intent ~= "" then
+    return { applicationIntent = app_intent }
+  end
+  return nil
+end
+
+-- Run one intent-enriched classify (content-safety + intent) for a set of intent
+-- messages. Returns a control string when the caller must exit, else nil (allow).
+local function classify_intent(conf, messages, message_type, session_information, tools)
+  if #messages == 0 then
+    return nil
+  end
+  local payload = lasso.build_payload({
+    messages = messages,
+    message_type = message_type,
+    session_id = session_id(conf),
+    user_id = resolve_user_id(conf),
+    tools = tools,
+    source_type = conf.source_type,
+    session_information = session_information,
+  })
+  -- Always /classify in intent mode: masking body-rewrite is out of scope here
+  -- (detect/block still enforced from the findings).
+  local data, err_kind = client.call(conf, "classify", payload)
+  if err_kind == "auth" then
+    return surface_auth()
+  elseif err_kind then
+    return fail_or_allow(conf, err_kind)
+  end
+  local decision = lasso.decide(data, messages, false)
+  if decision.action == "block" then
+    return kong.response.exit(conf.block_status_code,
+      { message = conf.block_message, reason = decision.detail })
+  end
+  return nil
+end
+
+local function access_intent(conf, body, trace_id)
+  local messages, count = lasso.to_intent_messages(body.messages, trace_id, 0)
+  -- The response phase continues the event index right after the request's events.
+  kong.ctx.shared.lasso_intent_count = count
+  return classify_intent(conf, messages, "PROMPT", intent_session_information(conf), body.tools)
+end
+
+local function response_intent(conf, trace_id)
+  local raw = kong.service.response.get_raw_body()
+  if not raw then
+    return nil
+  end
+  local body = cjson.decode(raw)
+  if type(body) ~= "table" or type(body.choices) ~= "table" then
+    return nil
+  end
+  local completion = {}
+  for _, c in ipairs(body.choices) do
+    if type(c) == "table" and type(c.message) == "table" then
+      completion[#completion + 1] = c.message
+    end
+  end
+  local start = kong.ctx.shared.lasso_intent_count or 0
+  local messages = lasso.to_intent_messages(completion, trace_id, start)
+  return classify_intent(conf, messages, "COMPLETION", nil, nil)
+end
+
 function AiLassoGuardrail:access(conf)
+  -- Intent double-duty: when seeded, this replaces the plain content-safety call
+  -- (it enforces block AND feeds intent on one classify).
+  local trace_id = intent_trace_id(conf)
+  if trace_id then
+    local ibody = kong.request.get_body()
+    if type(ibody) == "table" and type(ibody.messages) == "table" then
+      return access_intent(conf, ibody, trace_id)
+    end
+    return
+  end
+
   if not conf.guard_request then
     return
   end
@@ -171,6 +267,13 @@ end
 -- Defining :response triggers buffered proxying (disables streaming for the route), which is
 -- what lets us read + rewrite the full completion. Streaming output is therefore out of scope.
 function AiLassoGuardrail:response(conf)
+  -- Intent double-duty: capture the completion (the final answer + any tool-call
+  -- decision) as intent events, continuing the request phase's event index.
+  local trace_id = intent_trace_id(conf)
+  if trace_id then
+    return response_intent(conf, trace_id)
+  end
+
   if not conf.guard_response then
     return
   end

@@ -239,7 +239,7 @@ local function response_intent(conf, trace_id)
   local start = kong.ctx.shared.lasso_intent_count or 0
   local messages = lasso.to_intent_messages(completion, trace_id, start, cjson.decode)
   -- Finalize the trace the moment the turn produces its terminal answer, so the server scores it
-  -- now instead of after the 10-min silence timer. Tool-call turns (finish_reason "tool_calls")
+  -- now instead of after the server's inactivity timeout. Tool-call turns (finish_reason "tool_calls")
   -- are not marked, so a trace still mid-loop keeps accumulating.
   if conf.intent_finalize_on_stop ~= false and terminal and #messages > 0 then
     messages[#messages].isLastEventInTrace = true

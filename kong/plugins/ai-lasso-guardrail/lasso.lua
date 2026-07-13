@@ -4,8 +4,8 @@
 -- with busted on a plain Lua interpreter. Everything that touches the network or the Kong
 -- PDK lives in client.lua / handler.lua; the bug-prone table transforms live here.
 --
--- Mirrors the field names + block/mask semantics of the other Lasso integrations
--- (TrueFoundry `lasso.py`, Envoy `client.go`) so a shared contract stays recognizable.
+-- Mirrors the field names + block/mask semantics of the other Lasso gateway integrations,
+-- so a shared contract stays recognizable.
 
 local M = {}
 

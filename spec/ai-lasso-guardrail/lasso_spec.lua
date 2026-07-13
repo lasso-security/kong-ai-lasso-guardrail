@@ -316,7 +316,7 @@ describe("to_intent_messages", function()
   it("falls back to thinking_blocks when reasoning_content is absent", function()
     local out = lasso.to_intent_messages(
       { { role = "assistant", content = "done", thinking_blocks = {
-          { type = "thinking", thinking = "step 1" }, { type = "thinking", thinking = " step 2" } } } }, tid, 0)
+          { type = "thinking", thinking = "step 1" }, { type = "thinking", thinking = " step 2" } } } }, tid, 2)
     assert.equal("reasoning", out[1].content.type)
     assert.equal("step 1 step 2", out[1].content.content)
   end)

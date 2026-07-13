@@ -11,9 +11,12 @@ return {
           -- Lasso API. `referenceable` lets the key come from a Vault reference
           -- ({vault://...}); never hardcode it in the declarative config.
           { lasso_api_key = { type = "string", required = true, referenceable = true } },
+          -- `referenceable` so the base can also come from a Vault/env reference
+          -- ({vault://...}) rather than being written into declarative config.
           { lasso_api_base = {
               type = "string",
               default = "https://server.lasso.security/gateway/v3",
+              referenceable = true,
           } },
           -- /classifix (mask) when true, else /classify (detect+block only).
           { masking = { type = "boolean", default = false } },
@@ -21,7 +24,7 @@ return {
           { guard_request = { type = "boolean", default = true } },
           -- Intent double-duty (single-egress): when true AND a request carries the trace
           -- header, the plugin's existing access/response classify calls also feed the intent
-          -- pipeline (RND-6372 Suggestion 2) — the app only seeds a per-turn traceId. Auto-
+          -- pipeline — the app only seeds a per-turn traceId. Auto-
           -- masking body-rewrite is not applied in intent mode (detect/block still enforced).
           { intent = { type = "boolean", default = false } },
           -- Header the app stamps with a per-turn ULID traceId (see lasso-sdk KongIntent).
@@ -34,7 +37,7 @@ return {
           { intent_encoding_header = { type = "string", default = "x-lasso-encoding" } },
           -- Send the finalize marker (isLastEventInTrace) on a turn's terminal answer (completion
           -- finish_reason "stop") so the server finalizes + scores the trace immediately instead of
-          -- waiting out the 10-min silence timer. Turns still in a tool loop are left to accumulate.
+          -- waiting out the server's inactivity timeout. Turns still in a tool loop are left to accumulate.
           { intent_finalize_on_stop = { type = "boolean", default = true } },
           -- Response scanning buffers the upstream body (disables SSE streaming for the
           -- route) — leave off for streaming clients.

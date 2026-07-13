@@ -1,6 +1,7 @@
-# Intent double-duty e2e: Kong + plugin (intent=true) -> live Lasso staging for classify,
-# real LiteLLM proxy as the LLM upstream. No mock — everything downstream is real.
-#   LASSO_API_KEY='<intent-enabled token>' \
+# Intent double-duty e2e: Kong + plugin (intent=true) -> a live Lasso environment for classify,
+# a real LLM proxy as the upstream (set its URL in kong.intent.yml). No mock — everything
+# downstream is real.
+#   LASSO_API_KEY='<intent-enabled token>' LASSO_API_BASE='https://<your-lasso>/gateway/v3' \
 #     docker compose -f dev/docker-compose.intent.yml up -d --wait
 #   # then run the LangChain agent driver against http://localhost:8010
 #   docker compose -f dev/docker-compose.intent.yml down
@@ -17,6 +18,7 @@ services:
       KONG_NGINX_PROXY_PROXY_BUFFERING: "on"
       KONG_LOG_LEVEL: info
       LASSO_API_KEY: ${LASSO_API_KEY}
+      LASSO_API_BASE: ${LASSO_API_BASE:-https://server.lasso.security/gateway/v3}
     volumes:
       - ./kong.intent.yml:/kong/kong.intent.yml:ro
       - ../kong:/plugins/kong:ro

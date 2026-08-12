@@ -54,6 +54,13 @@ return {
           -- must come from the caller (the Kong AI ecosystem convention, e.g. Langfuse's
           -- X-Session-Id). When absent, a per-request ULID is generated instead.
           { session_header = { type = "string", default = "x-session-id" } },
+          -- Agent attribution (optional): which agent produced the inference. Forwarded as
+          -- `agentId` / `agentName` on every classify call; attribution/observability only,
+          -- never enforcement. Per-request `lasso-agent-id` / `lasso-agent-name` headers
+          -- override these. Both are omitted from the payload when unset.
+          { agent_id = { type = "string" } },
+          -- Self-asserted display name; a weaker matching signal than agent_id.
+          { agent_name = { type = "string" } },
           { block_status_code = {
               type = "integer", default = 400, between = { 100, 599 },
           } },

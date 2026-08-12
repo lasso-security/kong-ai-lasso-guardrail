@@ -35,5 +35,9 @@ services:
           masking: false
           fail_open: true
           source_type: kong
+          # Optional agent attribution (omitted when unset). Per-request `lasso-agent-id` /
+          # `lasso-agent-name` headers override these.
+          # agent_id: svc-support-bot
+          # agent_name: Support Bot
           block_status_code: 400
           block_message: "Request blocked by Lasso guardrail"

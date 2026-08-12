@@ -93,6 +93,33 @@ local function resolve_user_id(conf)
   return nil
 end
 
+-- Per-request agent-identity overrides. Fixed names (not configurable) so they match the Lasso
+-- proxy contract every integration speaks: LassoHeaders.LASSO_AGENT_ID / LASSO_AGENT_NAME.
+local AGENT_ID_HEADER = "lasso-agent-id"
+local AGENT_NAME_HEADER = "lasso-agent-name"
+
+-- Free-text headers are percent-encoded only when non-ASCII (flagged by the marker header);
+-- decode iff flagged, since a raw ASCII value may legitimately contain '%'. Same convention the
+-- intent/name headers use.
+local function pct_decoded(conf, value)
+  if value and kong.request.get_header(conf.intent_encoding_header) == "pct" then
+    return ngx.unescape_uri(value)
+  end
+  return value
+end
+
+-- Resolve one agent-identity field for the classify payload: per-request header over static
+-- config, sanitized. Returns nil when neither yields a usable value, so the field is omitted.
+local function agent_identity(conf, header_name, conf_value)
+  local raw = pct_decoded(conf, kong.request.get_header(header_name))
+  local value, header_rejected = lasso.resolve_agent_identity(raw, conf_value)
+  if header_rejected then
+    kong.log.warn("lasso guardrail: ignoring ", header_name, " — not a valid agent identity (max ",
+      lasso.AGENT_IDENTITY_MAX_LENGTH, " chars, no control or formatting characters)")
+  end
+  return value
+end
+
 -- Run one classify/classifix call. Returns a decision table from lasso.decide, or one of
 -- the control strings "allow" / "surface-auth" / "fail". Mutates `scan` on mask.
 local function classify(conf, scan, tools, source)
@@ -107,6 +134,8 @@ local function classify(conf, scan, tools, source)
     user_id = resolve_user_id(conf),
     tools = tools,
     source_type = conf.source_type,
+    agent_id = agent_identity(conf, AGENT_ID_HEADER, conf.agent_id),
+    agent_name = agent_identity(conf, AGENT_NAME_HEADER, conf.agent_name),
   })
   local endpoint = conf.masking and "classifix" or "classify"
   local data, err_kind = client.call(conf, endpoint, payload)
@@ -191,6 +220,8 @@ local function classify_intent(conf, messages, message_type, session_information
     tools = tools,
     source_type = conf.source_type,
     session_information = session_information,
+    agent_id = agent_identity(conf, AGENT_ID_HEADER, conf.agent_id),
+    agent_name = agent_identity(conf, AGENT_NAME_HEADER, conf.agent_name),
   })
   -- Always /classify in intent mode: masking body-rewrite is out of scope here
   -- (detect/block still enforced from the findings).

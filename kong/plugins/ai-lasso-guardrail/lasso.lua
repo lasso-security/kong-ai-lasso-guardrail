@@ -16,6 +16,7 @@ local DIRECTION = {
 }
 
 M.USER_ID_MAX_LENGTH = 128
+M.AGENT_IDENTITY_MAX_LENGTH = 128
 
 -- Reproducible events (text/tool_use/tool_result) are indexed on a stride so COMPLETION-only,
 -- non-reproducible events (reasoning) can slot strictly between them. A reproducible event at
@@ -56,6 +57,93 @@ function M.direction(source)
   return DIRECTION[(source or "INPUT"):upper()] or DIRECTION.INPUT
 end
 
+-- ── Agent identity (attribution) ────────────────────────────────────────────
+-- Optional, self-asserted `agentId` / `agentName` on the classify payload: which agent produced
+-- the inference. Attribution/observability only — never changes the verdict.
+
+-- Unicode control (Cc) + format (Cf) codepoint ranges — the classes the server rejects
+-- (`^[^\p{Cc}\p{Cf}]*$`). Lua patterns have no Unicode classes, so we decode the UTF-8 bytes and
+-- range-check. Deliberately a touch conservative (e.g. the unassigned U+2065 rides inside the
+-- U+2060..U+206F run): wrongly rejecting a codepoint costs only this call's attribution, while
+-- wrongly forwarding one costs the whole scan — the server 400s the entire request and a
+-- fail-open guardrail swallows that silently.
+local INVISIBLE_RANGES = {
+  { 0x0000, 0x001F }, { 0x007F, 0x009F },                             -- Cc: C0, DEL, C1
+  { 0x00AD, 0x00AD }, { 0x0600, 0x0605 }, { 0x061C, 0x061C },         -- Cf
+  { 0x06DD, 0x06DD }, { 0x070F, 0x070F }, { 0x0890, 0x0891 },
+  { 0x08E2, 0x08E2 }, { 0x180E, 0x180E }, { 0x200B, 0x200F },
+  { 0x202A, 0x202E }, { 0x2060, 0x206F }, { 0xFEFF, 0xFEFF },
+  { 0xFFF9, 0xFFFB }, { 0x110BD, 0x110BD }, { 0x110CD, 0x110CD },
+  { 0x13430, 0x1343F }, { 0x1BCA0, 0x1BCA3 }, { 0x1D173, 0x1D17A },
+  { 0xE0001, 0xE0001 }, { 0xE0020, 0xE007F },
+}
+
+-- True when `s` carries a control/format codepoint, or is not valid UTF-8 (malformed bytes are
+-- treated as unsafe: we can't tell what they'd decode to server-side). LuaJIT has no utf8
+-- library, so decode by hand.
+local function has_invisible(s)
+  local i, n = 1, #s
+  while i <= n do
+    local b = s:byte(i)
+    local cp, size
+    if b < 0x80 then
+      cp, size = b, 1
+    elseif b >= 0xC2 and b <= 0xDF then
+      cp, size = b - 0xC0, 2
+    elseif b >= 0xE0 and b <= 0xEF then
+      cp, size = b - 0xE0, 3
+    elseif b >= 0xF0 and b <= 0xF4 then
+      cp, size = b - 0xF0, 4
+    else
+      return true                    -- continuation byte, overlong lead, or out of range
+    end
+    for k = 1, size - 1 do
+      local cb = s:byte(i + k)
+      if not cb or cb < 0x80 or cb > 0xBF then
+        return true                  -- truncated sequence
+      end
+      cp = cp * 0x40 + (cb - 0x80)
+    end
+    for _, r in ipairs(INVISIBLE_RANGES) do
+      if cp >= r[1] and cp <= r[2] then
+        return true
+      end
+    end
+    i = i + size
+  end
+  return false
+end
+
+-- Sanitize one agent-identity value the way the server validates it: trim, then reject when the
+-- result is empty, longer than the cap, or carries control/format characters. Returns nil for a
+-- rejected value so the field is omitted rather than sent — a violating value makes the server
+-- 400 the WHOLE classify request, which fail-open swallows, losing all scanning for that call.
+-- The cap is counted in bytes (the server counts characters), which only ever rejects earlier.
+function M.sanitize_agent_identity(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+  local trimmed = value:match("^%s*(.-)%s*$")
+  if trimmed == "" or #trimmed > M.AGENT_IDENTITY_MAX_LENGTH or has_invisible(trimmed) then
+    return nil
+  end
+  return trimmed
+end
+
+-- Resolve one agent-identity field: the per-request header wins over the static plugin config,
+-- and each source is sanitized on its own. A supplied-but-invalid header falls back to the
+-- configured value rather than dropping attribution entirely. Returns (value, header_rejected);
+-- `header_rejected` lets the handler log it (this module stays kong-free). nil value ⟹ the field
+-- is omitted. `agentId` and `agentName` are resolved independently of each other.
+function M.resolve_agent_identity(header_value, conf_value)
+  local from_header = M.sanitize_agent_identity(header_value)
+  if from_header then
+    return from_header, false
+  end
+  local rejected = type(header_value) == "string" and header_value ~= ""
+  return M.sanitize_agent_identity(conf_value), rejected
+end
+
 -- Build the InvokeDeputiesRequest body (a Lua table; client.lua serializes it).
 function M.build_payload(opts)
   local payload = {
@@ -69,6 +157,14 @@ function M.build_payload(opts)
   end
   if opts.tools and #opts.tools > 0 then
     payload.tools = opts.tools
+  end
+  -- Agent attribution: already sanitized by the caller, and omitted when absent (an empty string
+  -- is a value the server validates and rejects, not the same as "not reported").
+  if opts.agent_id and opts.agent_id ~= "" then
+    payload.agentId = opts.agent_id
+  end
+  if opts.agent_name and opts.agent_name ~= "" then
+    payload.agentName = opts.agent_name
   end
   -- Intent double-duty: session baseline the trace is scored against (upserted server-side).
   if opts.session_information then

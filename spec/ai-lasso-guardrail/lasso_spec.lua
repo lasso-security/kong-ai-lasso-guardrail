@@ -76,6 +76,110 @@ describe("build_payload", function()
     })
     assert.same(tools, p.tools)
   end)
+
+  it("forwards agentId/agentName when resolved", function()
+    local p = lasso.build_payload({
+      messages = {}, message_type = "PROMPT", session_id = "s",
+      agent_id = "svc-support-bot", agent_name = "Support Bot",
+    })
+    assert.equal("svc-support-bot", p.agentId)
+    assert.equal("Support Bot", p.agentName)
+  end)
+
+  it("omits agentId/agentName when absent or empty", function()
+    local p = lasso.build_payload({
+      messages = {}, message_type = "PROMPT", session_id = "s", agent_name = "",
+    })
+    assert.is_nil(p.agentId)
+    assert.is_nil(p.agentName)
+  end)
+
+  it("forwards agentId while agentName is absent (independent fields)", function()
+    local p = lasso.build_payload({
+      messages = {}, message_type = "PROMPT", session_id = "s", agent_id = "svc-support-bot",
+    })
+    assert.equal("svc-support-bot", p.agentId)
+    assert.is_nil(p.agentName)
+  end)
+end)
+
+describe("sanitize_agent_identity", function()
+  it("trims and keeps a valid value", function()
+    assert.equal("svc-support-bot", lasso.sanitize_agent_identity("  svc-support-bot \t"))
+  end)
+
+  it("keeps non-ASCII names", function()
+    assert.equal("סוכן תמיכה", lasso.sanitize_agent_identity("סוכן תמיכה"))
+  end)
+
+  it("drops a non-string / empty / whitespace-only value", function()
+    assert.is_nil(lasso.sanitize_agent_identity(nil))
+    assert.is_nil(lasso.sanitize_agent_identity(42))
+    assert.is_nil(lasso.sanitize_agent_identity(""))
+    assert.is_nil(lasso.sanitize_agent_identity("   "))
+  end)
+
+  it("keeps a value at the cap and drops one over it", function()
+    assert.equal(128, #lasso.sanitize_agent_identity(string.rep("a", 128)))
+    assert.is_nil(lasso.sanitize_agent_identity(string.rep("a", 129)))
+  end)
+
+  it("drops control characters (Cc)", function()
+    assert.is_nil(lasso.sanitize_agent_identity("bot\nname"))
+    assert.is_nil(lasso.sanitize_agent_identity("bot\0name"))
+    assert.is_nil(lasso.sanitize_agent_identity("bot\127name"))
+    assert.is_nil(lasso.sanitize_agent_identity("bot\194\133name"))    -- U+0085 (C1)
+  end)
+
+  it("drops format characters (Cf) — bidi overrides and zero-width", function()
+    assert.is_nil(lasso.sanitize_agent_identity("bot\226\128\174name"))  -- U+202E RLO
+    assert.is_nil(lasso.sanitize_agent_identity("bot\226\128\139name"))  -- U+200B ZWSP
+    assert.is_nil(lasso.sanitize_agent_identity("bot\239\187\191"))      -- U+FEFF BOM
+    assert.is_nil(lasso.sanitize_agent_identity("bot\243\160\128\160"))  -- U+E0020 TAG SPACE
+  end)
+
+  it("keeps a high-plane codepoint that is not Cc/Cf", function()
+    assert.equal("bot\240\159\164\150", lasso.sanitize_agent_identity("bot\240\159\164\150")) -- 🤖
+  end)
+
+  it("drops malformed UTF-8 (unknowable server-side)", function()
+    assert.is_nil(lasso.sanitize_agent_identity("bot\255name"))
+    assert.is_nil(lasso.sanitize_agent_identity("bot\226\128"))          -- truncated sequence
+  end)
+end)
+
+describe("resolve_agent_identity", function()
+  it("uses the configured value when there is no header", function()
+    local v, rejected = lasso.resolve_agent_identity(nil, "svc-support-bot")
+    assert.equal("svc-support-bot", v)
+    assert.is_false(rejected)
+  end)
+
+  it("lets the header override the configured value", function()
+    local v, rejected = lasso.resolve_agent_identity("hdr-bot", "svc-support-bot")
+    assert.equal("hdr-bot", v)
+    assert.is_false(rejected)
+  end)
+
+  it("returns nil when neither source has a value", function()
+    assert.is_nil((lasso.resolve_agent_identity(nil, nil)))
+  end)
+
+  it("falls back to config and flags rejection for an over-cap header", function()
+    local v, rejected = lasso.resolve_agent_identity(string.rep("a", 129), "svc-support-bot")
+    assert.equal("svc-support-bot", v)
+    assert.is_true(rejected)
+  end)
+
+  it("drops a control-character header with no config to fall back to", function()
+    local v, rejected = lasso.resolve_agent_identity("hdr\226\128\174bot", nil)
+    assert.is_nil(v)
+    assert.is_true(rejected)
+  end)
+
+  it("drops an invalid configured value", function()
+    assert.is_nil((lasso.resolve_agent_identity(nil, string.rep("a", 200))))
+  end)
 end)
 
 describe("extract_block", function()

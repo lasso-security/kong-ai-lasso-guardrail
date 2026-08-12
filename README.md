@@ -69,8 +69,10 @@ Attach to an AI Proxy route (see `kong/kong.yml` for a full decK example):
 | `source_type` | `kong` | `source.type` for the "Used By" badge. |
 | `user_header` | `x-lasso-user-id` | Header to read a stable end-user id from (→ `userId`). |
 | `session_header` | `x-session-id` | Header carrying a client-supplied conversation id; reused across turns → one Lasso dialogue. Kong has no native session, so this comes from the caller (Langfuse/Fiddler convention). Falls back to a generated ULID. |
-| `agent_id` | — (unset) | Your own identifier for the agent behind this route (→ `agentId`). Attribution only. Overridden per request by the `lasso-agent-id` header. |
-| `agent_name` | — (unset) | Self-asserted agent display name (→ `agentName`); a weaker matching signal than `agent_id`. Overridden per request by the `lasso-agent-name` header. |
+| `agent_id` | — (unset) | Your own identifier for the agent behind this route (→ `agentId`). Attribution only. Overridden per request by `agent_id_header`. |
+| `agent_name` | — (unset) | Self-asserted agent display name (→ `agentName`); a weaker matching signal than `agent_id`. Overridden per request by `agent_name_header`. |
+| `agent_id_header` | `x-lasso-agent-id` | Header to read a per-request `agentId` from. |
+| `agent_name_header` | `x-lasso-agent-name` | Header to read a per-request `agentName` from. |
 | `intent` | `false` | Intent double-duty. When on **and** a request carries `intent_trace_header`, the existing `access`/`response` classify calls also feed the intent pipeline. Auto-masking body-rewrite is not applied in intent mode (detect/block still enforced). |
 | `intent_trace_header` | `x-lasso-trace-id` | Per-turn ULID `traceId` the app seeds (see the lasso-sdk `GatewayIntent` helper). Its presence activates intent for that request. |
 | `intent_app_intent_header` | `x-lasso-application-intent` | Application intent (the baseline the trace is scored against); upserted as session info. |
@@ -86,11 +88,12 @@ observability only — they never change a verdict or the response.
 
 | Source | Wins | Payload field |
 |---|---|---|
-| `lasso-agent-id` request header | over `agent_id` | `agentId` |
-| `lasso-agent-name` request header | over `agent_name` | `agentName` |
+| `agent_id_header` request header (default `x-lasso-agent-id`) | over `agent_id` | `agentId` |
+| `agent_name_header` request header (default `x-lasso-agent-name`) | over `agent_name` | `agentName` |
 
 Set `agent_id` / `agent_name` on the plugin for a route that fronts a single agent, and send the
-headers when one route fronts many. The two resolve independently (an id with no name is fine),
+headers when one route fronts many. Both header names are configurable, like `user_header` and
+`session_header`. The two fields resolve independently (an id with no name is fine),
 and are applied to every classify egress — prompt and completion, `classify` and `classifix` —
 so both directions of a turn carry the same attribution. When neither source has a value, the
 field is omitted from the payload.

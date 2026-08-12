@@ -56,11 +56,15 @@ return {
           { session_header = { type = "string", default = "x-session-id" } },
           -- Agent attribution (optional): which agent produced the inference. Forwarded as
           -- `agentId` / `agentName` on every classify call; attribution/observability only,
-          -- never enforcement. Per-request `lasso-agent-id` / `lasso-agent-name` headers
-          -- override these. Both are omitted from the payload when unset.
+          -- never enforcement. The headers below override these per request. Both are omitted
+          -- from the payload when unset.
           { agent_id = { type = "string" } },
           -- Self-asserted display name; a weaker matching signal than agent_id.
           { agent_name = { type = "string" } },
+          -- Headers carrying per-request agent attribution, for a route that fronts more than
+          -- one agent. A header value wins over the static config field above.
+          { agent_id_header = { type = "string", default = "x-lasso-agent-id" } },
+          { agent_name_header = { type = "string", default = "x-lasso-agent-name" } },
           { block_status_code = {
               type = "integer", default = 400, between = { 100, 599 },
           } },

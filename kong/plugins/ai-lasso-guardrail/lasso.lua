@@ -80,7 +80,7 @@ local INVISIBLE_RANGES = {
 
 -- True when `s` carries a control/format codepoint, or is not valid UTF-8 (malformed bytes are
 -- treated as unsafe: we can't tell what they'd decode to server-side). LuaJIT has no utf8
--- library, so decode by hand.
+-- library, so decode and validate by hand.
 local function has_invisible(s)
   local i, n = 1, #s
   while i <= n do
@@ -103,6 +103,13 @@ local function has_invisible(s)
         return true                  -- truncated sequence
       end
       cp = cp * 0x40 + (cb - 0x80)
+    end
+    -- Reject what decoded but isn't valid UTF-8: overlong encodings, UTF-16 surrogate halves, and
+    -- anything past U+10FFFF. cjson would fail to encode such a payload (killing the whole
+    -- classify call, not just the attribution), and the server would reject it too.
+    if (size == 3 and (cp < 0x800 or (cp >= 0xD800 and cp <= 0xDFFF)))
+       or (size == 4 and (cp < 0x10000 or cp > 0x10FFFF)) then
+      return true
     end
     for _, r in ipairs(INVISIBLE_RANGES) do
       if cp >= r[1] and cp <= r[2] then

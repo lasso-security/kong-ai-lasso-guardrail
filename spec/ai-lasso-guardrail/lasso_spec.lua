@@ -142,9 +142,15 @@ describe("sanitize_agent_identity", function()
     assert.equal("bot\240\159\164\150", lasso.sanitize_agent_identity("bot\240\159\164\150")) -- 🤖
   end)
 
-  it("drops malformed UTF-8 (unknowable server-side)", function()
+  it("drops malformed UTF-8 (unknowable server-side, and unencodable by cjson)", function()
     assert.is_nil(lasso.sanitize_agent_identity("bot\255name"))
     assert.is_nil(lasso.sanitize_agent_identity("bot\226\128"))          -- truncated sequence
+    assert.is_nil(lasso.sanitize_agent_identity("bot\128name"))          -- lone continuation byte
+    assert.is_nil(lasso.sanitize_agent_identity("bot\192\175"))          -- overlong 2-byte '/'
+    assert.is_nil(lasso.sanitize_agent_identity("bot\224\128\175"))      -- overlong 3-byte '/'
+    assert.is_nil(lasso.sanitize_agent_identity("bot\240\128\128\175"))  -- overlong 4-byte '/'
+    assert.is_nil(lasso.sanitize_agent_identity("bot\237\160\128"))      -- U+D800 surrogate half
+    assert.is_nil(lasso.sanitize_agent_identity("bot\244\144\128\128"))  -- above U+10FFFF
   end)
 end)
 

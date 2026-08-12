@@ -98,11 +98,12 @@ and are applied to every classify egress — prompt and completion, `classify` a
 so both directions of a turn carry the same attribution. When neither source has a value, the
 field is omitted from the payload.
 
-Values are trimmed and dropped (with a `warn` log) when empty, longer than 128 characters, or
-carrying control/format characters, because the server rejects the *whole* classify request on a
-violating value — under `fail_open` that would silently lose scanning for the call. Non-ASCII
-names are fine; percent-encode them and set `x-lasso-encoding: pct` (the same marker the intent
-headers use).
+Values are trimmed and dropped (with a `warn` log) when empty, longer than 128 **bytes**, not
+valid UTF-8, or carrying control/format characters — because the server rejects the *whole*
+classify request on a violating value, and under `fail_open` that would silently lose scanning
+for the call. The server's own cap is 128 *characters*, so counting bytes only ever rejects
+earlier, never later. Non-ASCII names are fine; percent-encode them and set
+`x-lasso-encoding: pct` (the same marker the intent headers use).
 
 ### Intent double-duty (single-egress)
 

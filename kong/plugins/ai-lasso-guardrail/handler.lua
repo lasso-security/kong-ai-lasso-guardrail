@@ -93,6 +93,37 @@ local function resolve_user_id(conf)
   return nil
 end
 
+-- Free-text headers are percent-encoded only when non-ASCII (flagged by the marker header);
+-- decode iff flagged, since a raw ASCII value may legitimately contain '%'. Same convention the
+-- intent/name headers use.
+local function pct_decoded(conf, value)
+  if value and kong.request.get_header(conf.intent_encoding_header) == "pct" then
+    return ngx.unescape_uri(value)
+  end
+  return value
+end
+
+-- Resolve one agent-identity field for the classify payload: the per-request header (name is
+-- configurable, like user_header/session_header) over the static config value, sanitized.
+-- Returns nil when neither yields a usable value, so the field is omitted.
+local function agent_identity(conf, header_name, conf_value, field)
+  local raw
+  if header_name and header_name ~= "" then
+    raw = pct_decoded(conf, kong.request.get_header(header_name))
+  end
+  local value, header_rejected = lasso.resolve_agent_identity(raw, conf_value)
+  if header_rejected then
+    kong.log.warn("lasso guardrail: ignoring ", header_name, " — not a valid agent identity (max ",
+      lasso.AGENT_IDENTITY_MAX_LENGTH, " bytes, no control or formatting characters)")
+  end
+  -- A configured value that never makes it through is a misconfiguration, not client input: say so
+  -- rather than leaving the route silently unattributed.
+  if not value and conf_value and conf_value ~= "" then
+    kong.log.warn("lasso guardrail: ignoring configured ", field, " — not a valid agent identity")
+  end
+  return value
+end
+
 -- Run one classify/classifix call. Returns a decision table from lasso.decide, or one of
 -- the control strings "allow" / "surface-auth" / "fail". Mutates `scan` on mask.
 local function classify(conf, scan, tools, source)
@@ -107,6 +138,8 @@ local function classify(conf, scan, tools, source)
     user_id = resolve_user_id(conf),
     tools = tools,
     source_type = conf.source_type,
+    agent_id = agent_identity(conf, conf.agent_id_header, conf.agent_id, "agent_id"),
+    agent_name = agent_identity(conf, conf.agent_name_header, conf.agent_name, "agent_name"),
   })
   local endpoint = conf.masking and "classifix" or "classify"
   local data, err_kind = client.call(conf, endpoint, payload)
@@ -191,6 +224,8 @@ local function classify_intent(conf, messages, message_type, session_information
     tools = tools,
     source_type = conf.source_type,
     session_information = session_information,
+    agent_id = agent_identity(conf, conf.agent_id_header, conf.agent_id, "agent_id"),
+    agent_name = agent_identity(conf, conf.agent_name_header, conf.agent_name, "agent_name"),
   })
   -- Always /classify in intent mode: masking body-rewrite is out of scope here
   -- (detect/block still enforced from the findings).

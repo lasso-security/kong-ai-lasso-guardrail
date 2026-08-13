@@ -34,6 +34,7 @@ runs on **Kong OSS** (no Enterprise 3.14 requirement).
 | Block (`findings[].action == BLOCK`) | ✅ `kong.response.exit` |
 | Mask (`AUTO_MASKING`, `/classifix`) | ✅ rewrites body via PDK |
 | Forward `tools`, `source`, ULID `sessionId`, `userId` | ✅ |
+| Forward agent attribution (`agentId` / `agentName`) | ✅ config or per-request header |
 | Configurable base URL + fail-mode | ✅ |
 | Streaming output | ❌ out of scope (response scanning buffers → disables SSE) |
 
@@ -68,6 +69,10 @@ Attach to an AI Proxy route (see `kong/kong.yml` for a full decK example):
 | `source_type` | `kong` | `source.type` for the "Used By" badge. |
 | `user_header` | `x-lasso-user-id` | Header to read a stable end-user id from (→ `userId`). |
 | `session_header` | `x-session-id` | Header carrying a client-supplied conversation id; reused across turns → one Lasso dialogue. Kong has no native session, so this comes from the caller (Langfuse/Fiddler convention). Falls back to a generated ULID. |
+| `agent_id` | — (unset) | Your own identifier for the agent behind this route (→ `agentId`). Attribution only. Overridden per request by `agent_id_header`. |
+| `agent_name` | — (unset) | Self-asserted agent display name (→ `agentName`); a weaker matching signal than `agent_id`. Overridden per request by `agent_name_header`. |
+| `agent_id_header` | `x-lasso-agent-id` | Header to read a per-request `agentId` from. |
+| `agent_name_header` | `x-lasso-agent-name` | Header to read a per-request `agentName` from. |
 | `intent` | `false` | Intent double-duty. When on **and** a request carries `intent_trace_header`, the existing `access`/`response` classify calls also feed the intent pipeline. Auto-masking body-rewrite is not applied in intent mode (detect/block still enforced). |
 | `intent_trace_header` | `x-lasso-trace-id` | Per-turn ULID `traceId` the app seeds (see the lasso-sdk `GatewayIntent` helper). Its presence activates intent for that request. |
 | `intent_app_intent_header` | `x-lasso-application-intent` | Application intent (the baseline the trace is scored against); upserted as session info. |
@@ -75,6 +80,30 @@ Attach to an AI Proxy route (see `kong/kong.yml` for a full decK example):
 | `intent_encoding_header` | `x-lasso-encoding` | When `pct`, the plugin percent-decodes the intent/name headers (the seeder sets it only when they contain non-ASCII, e.g. Hebrew/emoji). |
 | `intent_finalize_on_stop` | `true` | Finalize + score the trace immediately on a turn's terminal answer (completion `finish_reason` `stop`) instead of waiting the server's inactivity timeout. Tool-call turns keep accumulating. |
 | `block_status_code` / `block_message` | `400` / … | Response when blocked. |
+
+### Agent identity (attribution)
+
+Optionally tell Lasso which agent produced the inference. Both fields are attribution and
+observability only — they never change a verdict or the response.
+
+| Source | Wins | Payload field |
+|---|---|---|
+| `agent_id_header` request header (default `x-lasso-agent-id`) | over `agent_id` | `agentId` |
+| `agent_name_header` request header (default `x-lasso-agent-name`) | over `agent_name` | `agentName` |
+
+Set `agent_id` / `agent_name` on the plugin for a route that fronts a single agent, and send the
+headers when one route fronts many. Both header names are configurable, like `user_header` and
+`session_header`. The two fields resolve independently (an id with no name is fine),
+and are applied to every classify egress — prompt and completion, `classify` and `classifix` —
+so both directions of a turn carry the same attribution. When neither source has a value, the
+field is omitted from the payload.
+
+Values are trimmed and dropped (with a `warn` log) when empty, longer than 128 **bytes**, not
+valid UTF-8, or carrying control/format characters — because the server rejects the *whole*
+classify request on a violating value, and under `fail_open` that would silently lose scanning
+for the call. The server's own cap is 128 *characters*, so counting bytes only ever rejects
+earlier, never later. Non-ASCII names are fine; percent-encode them and set
+`x-lasso-encoding: pct` (the same marker the intent headers use).
 
 ### Intent double-duty (single-egress)
 
@@ -101,7 +130,7 @@ plugins:
 
 ```bash
 # Pure logic (runs anywhere with Lua/busted; verified via Docker):
-docker run --rm -v "$PWD":/data -w /data imega/busted busted spec/    # 19 passing
+docker run --rm -v "$PWD":/data -w /data imega/busted busted spec/    # 60 passing
 
 # End-to-end against a real Kong (CI): needs Pongo/Docker
 pongo run spec/ai-lasso-guardrail/integration_spec.lua

@@ -14,7 +14,7 @@ local cjson = require "cjson.safe"
 local AiLassoGuardrail = {
   -- Above ai-proxy (770) so we see and can mutate the original chat body before it proxies.
   PRIORITY = 772,
-  VERSION = "1.0.0",
+  VERSION = "1.0.1",
 }
 
 -- Flatten OpenAI multimodal content (string | array of blocks) to text for classification.

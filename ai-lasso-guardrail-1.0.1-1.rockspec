@@ -1,9 +1,9 @@
 package = "ai-lasso-guardrail"
-version = "1.0.0-1"
+version = "1.0.1-1"
 
 source = {
   url = "git+https://github.com/lasso-security/kong-ai-lasso-guardrail.git",
-  tag = "1.0.0",
+  tag = "1.0.1",
 }
 
 description = {

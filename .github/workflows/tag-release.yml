@@ -50,6 +50,9 @@ jobs:
 
       - name: Create and push tag
         run: |
+          # An annotated tag needs a committer identity, which the runner has none of.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${{ steps.ver.outputs.tag }}" -m "Release ${{ steps.ver.outputs.tag }}"
           git push origin "refs/tags/${{ steps.ver.outputs.tag }}"
 

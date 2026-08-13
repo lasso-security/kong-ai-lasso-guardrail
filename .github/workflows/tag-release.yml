@@ -1,0 +1,59 @@
+name: tag-release
+
+# Manually cut a release. Reads the version from the rockspec at the chosen ref
+# and pushes the matching git tag, which triggers `release.yml` to publish the
+# rock to LuaRocks.
+#
+# Flow: bump the rockspec (rename + `version` + `source.tag`) in a normal
+# reviewed PR, then run this workflow. `ref` defaults to main; point it at an
+# older branch/commit to cut a hotfix off an earlier point. LuaRocks versions
+# are immutable, so "rollback" = ship a new (higher) version of the reverted
+# code, not re-publishing an old one.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or SHA to release from"
+        required: false
+        default: main
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Read version from rockspec
+        id: ver
+        run: |
+          rockspec=$(ls ai-lasso-guardrail-*.rockspec)
+          tag=$(sed -n 's/^[[:space:]]*tag[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' "$rockspec")
+          if [ -z "$tag" ]; then
+            echo "::error::Could not read source.tag from $rockspec"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Cutting release for $rockspec (ref ${{ inputs.ref }}) -> tag $tag"
+
+      - name: Fail if tag already exists
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.ver.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.ver.outputs.tag }} already exists (versions are immutable). Bump the rockspec version first."
+            exit 1
+          fi
+
+      - name: Create and push tag
+        run: |
+          git tag -a "${{ steps.ver.outputs.tag }}" -m "Release ${{ steps.ver.outputs.tag }}"
+          git push origin "refs/tags/${{ steps.ver.outputs.tag }}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.ver.outputs.tag }}" --title "${{ steps.ver.outputs.tag }}" --generate-notes --target "${{ steps.ver.outputs.tag }}"

@@ -1,16 +1,25 @@
 name: release
 
-# Publish the LuaRocks rock when a version tag is pushed (e.g. `1.0.0`).
+# Publish the LuaRocks rock for a version tag: pushed by hand, or called by
+# `tag-release` (a GITHUB_TOKEN-pushed tag starts no run).
 # Requires a repo/org secret LUAROCKS_API_KEY (DevOps to provision).
 on:
   push:
     tags: ["*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: "Version tag to publish"
+        required: true
+        type: string
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: leafo/gh-actions-lua@v10
         with:
           luaVersion: "5.1"

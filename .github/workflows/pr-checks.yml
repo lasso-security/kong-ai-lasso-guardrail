@@ -2,24 +2,24 @@ name: PR Validations
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, edited, synchronize]
 
 permissions:
   pull-requests: write
   contents: read
 
 jobs:
-  claude-security-review:
+  pr-validation:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           token: ${{ secrets.LASSOPS_PUSH }}
-      
-      - uses: anthropics/claude-code-security-review@0c6a49f1fa56a1d472575da86a94dbc1edb78eda # main
+
+      - name: Run PR Validations
+        uses: lasso-security/github-action/pr-validation@dev
         with:
-          comment-pr: true
-          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
-          claude-model: "claude-sonnet-4-20250514"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          linear-token: ${{ secrets.LINEAR_APP_TOKEN }}

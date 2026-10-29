@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send failure notification
-        uses: lasso-security/github-action/notify-failure@notify-failure-1.0.6
+        uses: lasso-security/github-action/notify-failure@dev
         with:
           environment: 'Scan Dependabot Open PR'
           slack-channel: 'C092UBTFZRV'  # #infra-failuers

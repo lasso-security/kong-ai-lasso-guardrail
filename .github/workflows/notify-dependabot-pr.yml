@@ -15,6 +15,6 @@ jobs:
 
     steps:
       - name: Send Dependabot Alert
-        uses: lasso-security/github-action/dependabot-new-pr-alert@dependabot-new-pr-alert-1.0.3
+        uses: lasso-security/github-action/dependabot-new-pr-alert@dev
         with:
           slack_bot_token: ${{ secrets.SLACK_GITHUB_BOT }}

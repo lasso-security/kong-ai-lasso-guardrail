@@ -38,7 +38,7 @@ jobs:
             }]' > attachments.json
 
           jq -n \
-            --arg channel "#dependabot" \
+            --arg channel "C07CCL283UH" \
             --arg header "🧵 *Open Dependabot PRs in \`$REPO\`*" \
             --slurpfile atts attachments.json \
             '{
@@ -52,8 +52,8 @@ jobs:
         uses: slackapi/slack-github-action@v2.1.1
         with:
           payload-file-path: payload.json
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_GITHUB_BOT }}
 
   notify_failure:
     if: ${{ failure() }}
@@ -62,9 +62,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send failure notification
-        uses: lasso-security/github-action/notify-failure@notify-failure-1.0.3
+        uses: lasso-security/github-action/notify-failure@dev
         with:
           environment: 'Scan Dependabot Open PR'
-          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
-          slack-channel: '#infra-failuers'
+          slack-channel: 'C092UBTFZRV'  # #infra-failuers
           slack-bot-token: ${{ secrets.SLACK_GITHUB_BOT }}

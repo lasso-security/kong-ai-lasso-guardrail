@@ -22,9 +22,13 @@ jobs:
 
       - name: Lua syntax check (parse all sources + specs)
         run: |
-          for f in $(find kong spec -name '*.lua' | sort); do
+          for f in $(find kong spec scripts ai-gateway -name '*.lua' | sort); do
             lua -e "assert(loadfile('$f'))" && echo "ok   $f"
           done
 
+      # ai-gateway/handler.lua is generated from kong/plugins/; fail if someone forgot to rebuild.
+      - name: AI Gateway policy bundle is up to date
+        run: lua scripts/build-policy.lua --check
+
       - name: Unit tests (busted)
-        run: busted spec/ai-lasso-guardrail/lasso_spec.lua
+        run: busted spec/ai-lasso-guardrail/lasso_spec.lua spec/ai-lasso-guardrail/policy_bundle_spec.lua

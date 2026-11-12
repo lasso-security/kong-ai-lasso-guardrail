@@ -1,0 +1,67 @@
+# Example kongctl config: a Lasso Security guardrail policy on a Kong AI Gateway 2.x AI Model.
+#
+# Register the custom policy type first (once per AI Gateway, see docs/ai-gateway-policy.md), then:
+#
+#   export AI_GATEWAY_ID=...  KONNECT_PAT=...  OPENAI_API_KEY=...
+#   kongctl apply -f ai-gateway/kongctl.yaml --pat "$KONNECT_PAT"
+#
+# The Lasso key never enters this file: `{vault://env/lasso-api-key}` resolves to the
+# LASSO_API_KEY environment variable on the data plane.
+
+ai_gateway_policies:
+  - ref: lasso-guardrail
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: lasso-guardrail
+    display_name: "Lasso Security guardrail"
+    type: ai-lasso-guardrail          # the name the custom policy was registered with
+    enabled: true
+    config:
+      lasso_api_key: "{vault://env/lasso-api-key}"
+      lasso_api_base: https://server.lasso.security/gateway/v3
+      guard_request: true             # scan prompts
+      guard_response: true            # scan completions (buffered; pair with response_streaming: deny)
+      masking: false                  # true = /classifix, redact PII in place instead of only detecting
+      fail_open: true                 # allow traffic if Lasso times out or returns 5xx; auth errors always surface
+      block_status_code: 400
+      block_message: "Request blocked by Lasso guardrail"
+
+ai_gateway_model_providers:
+  - ref: openai
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: openai
+    type: openai
+    config:
+      auth:
+        type: basic
+        headers:
+          - name: Authorization
+            value: !secret {parts: ["Bearer ", !env OPENAI_API_KEY]}
+
+ai_gateway_models:
+  - ref: gpt-chat
+    ai_gateway: !lookup { id: !env AI_GATEWAY_ID }
+    name: gpt-chat
+    enabled: true
+    type: model
+    capabilities:
+      - generate
+    policies:
+      - lasso-guardrail               # attach the guardrail to this model
+    formats:
+      - type: openai
+    targets:
+      - name: gpt-4o                  # the provider's model id
+        provider: openai
+        config:
+          type: openai
+    config:
+      route:
+        paths:
+          - /v1
+        model:
+          body_param: model
+          values:
+            - gpt-chat
+      # A streamed reply skips the response phase, so a client could opt out of completion
+      # scanning with `stream: true`. With guard_response on, refuse streaming instead.
+      response_streaming: deny

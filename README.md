@@ -49,9 +49,23 @@ export KONG_PLUGINS=bundled,ai-lasso-guardrail
 kong reload
 ```
 
-**Konnect** dedicated cloud gateways: upload via **Custom Plugin Streaming** (the plugin is
-self-contained in `schema.lua` + `handler.lua` + two local modules — within Konnect's custom
-plugin limits).
+**Konnect**: upload via **Custom Plugin Streaming** using `kong/plugins/ai-lasso-guardrail/schema.lua`
+and the single-file `ai-gateway/handler.lua` (the plugin's local modules inlined, since a
+streamed plugin is exactly those two files).
+
+### Kong AI Gateway 2.x (custom policy)
+
+On Kong AI Gateway 2.x the same code ships as a **streaming custom policy**: register
+`schema.lua` + `ai-gateway/handler.lua` once per AI Gateway, then attach a policy instance to
+your AI Models. Full guide (prerequisites, registration, kongctl config, limitations):
+[docs/ai-gateway-policy.md](docs/ai-gateway-policy.md). Example config:
+[ai-gateway/kongctl.yaml](ai-gateway/kongctl.yaml).
+
+`ai-gateway/handler.lua` is generated. Edit `kong/plugins/ai-lasso-guardrail/*.lua`, then:
+
+```bash
+lua scripts/build-policy.lua           # rebuild (CI runs it with --check)
+```
 
 ## Configure
 
@@ -130,7 +144,7 @@ plugins:
 
 ```bash
 # Pure logic (runs anywhere with Lua/busted; verified via Docker):
-docker run --rm -v "$PWD":/data -w /data imega/busted busted spec/    # 60 passing
+docker run --rm -v "$PWD":/data -w /data imega/busted busted spec/    # 62 passing
 
 # End-to-end against a real Kong (CI): needs Pongo/Docker
 pongo run spec/ai-lasso-guardrail/integration_spec.lua
@@ -148,6 +162,11 @@ kong/plugins/ai-lasso-guardrail/
   lasso.lua     pure translation logic (block/mask/ulid) — unit-tested
   client.lua    resty.http + cjson transport
 kong/kong.yml   example decK config
+ai-gateway/
+  handler.lua   GENERATED single-file handler for AI Gateway 2.x / streaming (scripts/build-policy.lua)
+  kongctl.yaml  example AI Gateway 2.x policy + AI Model
+docs/
+  ai-gateway-policy.md   Kong policies hub page
 spec/           busted unit tests + Pongo integration spec
 dev/            local Kong e2e harness (docker-compose + mock)
 ```
